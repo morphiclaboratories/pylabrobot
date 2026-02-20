@@ -1111,10 +1111,10 @@ class KX2Can:
         self.node_input_config[i][j].logic = InputLogic.GeneralPurpose
         self.node_input_config[i][j].logic_high = True
 
-    # Initialize python-can bus
+    # Initialize python-can bus. PEAK driver (e.g. Mac-CAN on macOS) must be installed.
     self._can_device = can.Bus(
-      interface="pcan",  # Or 'usbcan', 'kvaser', etc. based on setup
-      channel=None,  # e.g., 'PCAN_USBBUS1' or int 0 for default
+      interface="pcan",
+      channel="PCAN_USBBUS1",  # first PCAN-USB adapter
       bitrate=baud_rate,
       is_extended_id=False,
     )
