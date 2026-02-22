@@ -2505,6 +2505,8 @@ function classForResourceType(type, category) {
       return Carrier;
     case "Container":
       return Container;
+    case "AddressableTrough":
+      return Container;
     case "Trough":
       return Trough;
     case "VantageDeck":
