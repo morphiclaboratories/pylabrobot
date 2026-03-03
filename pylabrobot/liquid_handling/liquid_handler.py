@@ -465,9 +465,9 @@ class LiquidHandler(Resource, Machine):
     # checks
     self._assert_resources_exist(tip_spots)
     self._make_sure_channels_exist(use_channels)
-    assert (
-      len(tip_spots) == len(offsets) == len(use_channels)
-    ), "Number of tips and offsets and use_channels must be equal."
+    assert len(tip_spots) == len(offsets) == len(use_channels), (
+      "Number of tips and offsets and use_channels must be equal."
+    )
 
     # create operations
     pickups = [
@@ -494,16 +494,23 @@ class LiquidHandler(Resource, Machine):
       del backend_kwargs[extra]
 
     # actually pick up the tips
-    error: Optional[Exception] = None
+    error: Optional[BaseException] = None
     try:
       await self.backend.pick_up_tips(ops=pickups, use_channels=use_channels, **backend_kwargs)
-    except Exception as e:
+    except BaseException as e:
       error = e
 
     # determine which channels were successful
     successes = [error is None] * len(pickups)
-    if error is not None and isinstance(error, ChannelizedError):
-      successes = [channel_idx not in error.errors for channel_idx in use_channels]
+    if error is not None:
+      try:
+        tip_presence = await self.backend.request_tip_presence()
+        successes = [tip_presence[ch] is True for ch in use_channels]
+      except Exception as tip_presence_error:
+        if not isinstance(tip_presence_error, NotImplementedError):
+          logger.warning("Failed to query tip presence after error: %s", tip_presence_error)
+        if isinstance(error, ChannelizedError):
+          successes = [channel_idx not in error.errors for channel_idx in use_channels]
 
     # commit or rollback the state trackers
     for channel, op, success in zip(use_channels, pickups, successes):
@@ -602,9 +609,9 @@ class LiquidHandler(Resource, Machine):
     # checks
     self._assert_resources_exist(tip_spots)
     self._make_sure_channels_exist(use_channels)
-    assert (
-      len(tip_spots) == len(offsets) == len(use_channels) == len(tips)
-    ), "Number of channels and offsets and use_channels and tips must be equal."
+    assert len(tip_spots) == len(offsets) == len(use_channels) == len(tips), (
+      "Number of channels and offsets and use_channels and tips must be equal."
+    )
 
     # create operations
     drops = [
@@ -633,16 +640,23 @@ class LiquidHandler(Resource, Machine):
       del backend_kwargs[extra]
 
     # actually drop the tips
-    error: Optional[Exception] = None
+    error: Optional[BaseException] = None
     try:
       await self.backend.drop_tips(ops=drops, use_channels=use_channels, **backend_kwargs)
-    except Exception as e:
+    except BaseException as e:
       error = e
 
     # determine which channels were successful
     successes = [error is None] * len(drops)
-    if error is not None and isinstance(error, ChannelizedError):
-      successes = [channel_idx not in error.errors for channel_idx in use_channels]
+    if error is not None:
+      try:
+        tip_presence = await self.backend.request_tip_presence()
+        successes = [tip_presence[ch] is False for ch in use_channels]
+      except Exception as tip_presence_error:
+        if not isinstance(tip_presence_error, NotImplementedError):
+          logger.warning("Failed to query tip presence after error: %s", tip_presence_error)
+        if isinstance(error, ChannelizedError):
+          successes = [channel_idx not in error.errors for channel_idx in use_channels]
 
     # commit or rollback the state trackers
     for channel, op, success in zip(use_channels, drops, successes):
@@ -2156,9 +2170,9 @@ class LiquidHandler(Resource, Machine):
 
     # get the location of the destination
     if isinstance(destination, ResourceStack):
-      assert (
-        destination.direction == "z"
-      ), "Only ResourceStacks with direction 'z' are currently supported"
+      assert destination.direction == "z", (
+        "Only ResourceStacks with direction 'z' are currently supported"
+      )
 
       # the resource can be rotated wrt the ResourceStack. This is allowed as long
       # as it's in multiples of 180 degrees. 90 degrees is not allowed.
@@ -2826,7 +2840,7 @@ class LiquidHandler(Resource, Machine):
 
       # 6: Execute tip movement/consolidation
       for idx, target_tip_spots in enumerate(merged_target_tip_clusters):
-        print(f"   - tip transfer cycle: {idx+1} / {len_transfers}")
+        print(f"   - tip transfer cycle: {idx + 1} / {len_transfers}")
 
         origin_tip_spots = [all_origin_tip_spots.pop(0) for _ in range(len(target_tip_spots))]
 
