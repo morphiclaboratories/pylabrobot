@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
-from pylabrobot.arms.precise_flex.coords import PreciseFlexCartesianCoords
+from pylabrobot.arms.standard import GripperPose, JointCoords
 from pylabrobot.machines.backend import MachineBackend
 
 
@@ -77,7 +77,7 @@ class SCARABackend(MachineBackend, metaclass=ABCMeta):
   @abstractmethod
   async def approach(
     self,
-    position: Union[PreciseFlexCartesianCoords, Dict[int, float]],
+    position: Union[GripperPose, JointCoords],
     access: Optional[AccessPattern] = None,
   ) -> None:
     """Move the arm to an approach position (offset from target).
@@ -90,7 +90,7 @@ class SCARABackend(MachineBackend, metaclass=ABCMeta):
   @abstractmethod
   async def pick_up_resource(
     self,
-    position: Union[PreciseFlexCartesianCoords, Dict[int, float]],
+    position: Union[GripperPose, JointCoords],
     plate_width: float,
     access: Optional[AccessPattern] = None,
   ) -> None:
@@ -104,7 +104,7 @@ class SCARABackend(MachineBackend, metaclass=ABCMeta):
   @abstractmethod
   async def drop_resource(
     self,
-    position: Union[PreciseFlexCartesianCoords, Dict[int, float]],
+    position: Union[GripperPose, JointCoords],
     access: Optional[AccessPattern] = None,
   ) -> None:
     """Place a plate at the specified position.
@@ -115,15 +115,17 @@ class SCARABackend(MachineBackend, metaclass=ABCMeta):
     """
 
   @abstractmethod
-  async def move_to(self, position: Union[PreciseFlexCartesianCoords, Dict[int, float]]) -> None:
+  async def move_to(self, position: Union[GripperPose, JointCoords]) -> None:
     """Move the arm to a specified position in 3D space or in joint space."""
+
+  # TODO: move_to_cartesian and move_to_joint
 
   @abstractmethod
   async def get_joint_position(self) -> Dict[int, float]:
     """Get the current position of the arm in joint space."""
 
   @abstractmethod
-  async def get_cartesian_position(self) -> PreciseFlexCartesianCoords:
+  async def get_cartesian_position(self) -> GripperPose:
     """Get the current position of the arm in 3D space."""
 
   @abstractmethod
@@ -137,3 +139,11 @@ class SCARABackend(MachineBackend, metaclass=ABCMeta):
   @abstractmethod
   async def end_freedrive_mode(self) -> None:
     """Exit freedrive mode."""
+
+  async def activate_free_mode(self) -> None:
+    """Activates free / "drag to teach" mode."""
+    raise NotImplementedError("Free mode not implemented for this backend.")
+
+  async def deactivate_free_mode(self) -> None:
+    """Deactivates free mode."""
+    raise NotImplementedError("Free mode not implemented for this backend.")
