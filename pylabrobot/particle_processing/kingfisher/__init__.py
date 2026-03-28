@@ -1,10 +1,6 @@
-"""KingFisher Presto magnetic particle processor."""
+"""KingFisher Presto/Duo magnetic particle processor."""
 
-from .presto_backend import KingFisherPrestoBackend, TurntableLocation
-from .presto import KingFisherPresto
-
-__all__ = [
-  "KingFisherPresto",
-  "KingFisherPrestoBackend",
-  "TurntableLocation",
-]
+from pylabrobot.particle_processing.kingfisher.duo_backend import KingFisherDuoBackend
+from pylabrobot.particle_processing.kingfisher.kingfisher import KingFisher
+from pylabrobot.particle_processing.kingfisher.kingfisher_backend import KingFisherBackend, TurntableLocation
+from pylabrobot.particle_processing.kingfisher.presto_backend import KingFisherPrestoBackend

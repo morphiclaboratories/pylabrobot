@@ -10,14 +10,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from .presto_connection import (
+from pylabrobot.particle_processing.kingfisher.presto_connection import (
   PrestoConnectionError,
   _find_complete_message,
   format_error_message,
   get_error_code_description,
 )
-from .presto_backend import KingFisherPrestoBackend, TurntableLocation, _cmd_xml
-from .presto import KingFisherPresto
+from pylabrobot.particle_processing.kingfisher.kingfisher_backend import (
+  KingFisherBackend,
+  TurntableLocation,
+  _cmd_xml,
+)
+from pylabrobot.particle_processing.kingfisher.presto_backend import KingFisherPrestoBackend
+from pylabrobot.particle_processing.kingfisher.kingfisher import KingFisher
 
 
 # -----------------------------------------------------------------------------
@@ -275,7 +280,7 @@ class TestFrontend:
     evt_load = ET.fromstring('<Evt name="LoadPlate" plate="Plate1"/>')
     mock_backend.get_event = AsyncMock(side_effect=[evt_load])
     mock_backend._setup_finished = True
-    presto = KingFisherPresto(backend=mock_backend)
+    presto = KingFisher(backend=mock_backend)
     presto._setup_finished = True
     name, evt, ack = asyncio.run(presto.next_event())
     assert name == "LoadPlate", "FRONTEND: next_event must return event name."
@@ -289,7 +294,7 @@ class TestFrontend:
     )
     mock_backend.get_event = AsyncMock()
     mock_backend._setup_finished = True
-    presto = KingFisherPresto(backend=mock_backend)
+    presto = KingFisher(backend=mock_backend)
     presto._setup_finished = True
     name, evt, ack = asyncio.run(presto.next_event(attach=True))
     assert name == "Ready" and evt is None and ack is None
@@ -301,7 +306,7 @@ class TestFrontend:
       return_value={"ok": True, "status": "Idle", "error_code": None, "error_text": None, "error_code_description": None}
     )
     mock_backend._setup_finished = True
-    presto = KingFisherPresto(backend=mock_backend)
+    presto = KingFisher(backend=mock_backend)
     presto._setup_finished = True
     result = asyncio.run(presto.get_run_state())
     assert result["status"] == "Idle"
@@ -311,7 +316,7 @@ class TestFrontend:
     mock_backend = MagicMock()
     mock_backend.start_protocol = AsyncMock(return_value=None)
     mock_backend._setup_finished = True
-    presto = KingFisherPresto(backend=mock_backend)
+    presto = KingFisher(backend=mock_backend)
     presto._setup_finished = True
     asyncio.run(presto.start_protocol("MyProtocol", tip="Tip1", step="Step1"))
     mock_backend.start_protocol.assert_called_once_with("MyProtocol", tip="Tip1", step="Step1")
@@ -322,7 +327,7 @@ class TestFrontend:
     mock_backend.load_plate = AsyncMock(return_value=None)
     mock_backend.get_turntable_state.return_value = {1: "processing", 2: "loading"}
     mock_backend._setup_finished = True
-    presto = KingFisherPresto(backend=mock_backend)
+    presto = KingFisher(backend=mock_backend)
     presto._setup_finished = True
     asyncio.run(presto.rotate(position=1, location=TurntableLocation.LOADING))
     mock_backend.rotate.assert_called_once_with(position=1, location=TurntableLocation.LOADING)
@@ -333,7 +338,7 @@ class TestFrontend:
     mock_backend = MagicMock()
     mock_backend.load_plate = AsyncMock(side_effect=ValueError("Turntable state unknown; call rotate() first."))
     mock_backend._setup_finished = True
-    presto = KingFisherPresto(backend=mock_backend)
+    presto = KingFisher(backend=mock_backend)
     presto._setup_finished = True
     with pytest.raises(ValueError, match="Turntable state unknown"):
       asyncio.run(presto.load_plate())

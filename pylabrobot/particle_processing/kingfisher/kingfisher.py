@@ -1,4 +1,4 @@
-"""High-level KingFisher Presto machine frontend wrapping the backend.
+"""High-level KingFisher machine frontend wrapping the backend.
 
 Same lifecycle as other machines (setup(), stop(), async with).
 Exposes start_protocol(), get_status(), acknowledge(), error_acknowledge(),
@@ -11,19 +11,32 @@ import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from pylabrobot.machines.machine import Machine, need_setup_finished
-from pylabrobot.particle_processing.kingfisher.presto_backend import KingFisherPrestoBackend, TurntableLocation
+from pylabrobot.particle_processing.kingfisher.bdz import (
+  BdzProtocol,
+  _CONTRACTS,
+  read_bdz,
+  write_bdz,
+)
+from pylabrobot.particle_processing.kingfisher.kingfisher_backend import (
+  KingFisherBackend,
+  TurntableLocation,
+)
 
 
-class KingFisherPresto(Machine):
-  """High-level KingFisher Presto magnetic particle processor.
+class KingFisher(Machine):
+  """High-level KingFisher magnetic particle processor frontend.
 
-  Wraps KingFisherPrestoBackend; same API pattern as Thermocycler/Machine.
-  Use next_event() for (name, evt, ack) or events() for a raw event stream.
+  Works with any :class:`KingFisherBackend` subclass — pass
+  :class:`KingFisherBackend` for the Presto or
+  :class:`KingFisherDuoBackend` for the Duo.
+
+  Use :meth:`next_event` for ``(name, evt, ack)`` or :meth:`events` for a
+  raw event stream.
   """
 
-  def __init__(self, backend: KingFisherPrestoBackend):
+  def __init__(self, backend: KingFisherBackend):
     super().__init__(backend=backend)
-    self.backend: KingFisherPrestoBackend = backend
+    self.backend: KingFisherBackend = backend
     self._last_run_state: Optional[Dict[str, Any]] = None
 
   async def setup(self, *, initialize_turntable: bool = False, **backend_kwargs) -> None:
@@ -232,6 +245,29 @@ class KingFisherPresto(Machine):
     if state is unknown. For explicit control use rotate() and get_turntable_state().
     """
     await self.backend.load_plate()
+
+  @need_setup_finished
+  async def upload_protocol(self, name: str, protocol: BdzProtocol) -> None:
+    """Serialize *protocol* and upload it to instrument memory.
+
+    Validates that ``protocol.variant`` matches the backend's contract to
+    prevent uploading a Duo protocol to a Presto (or vice versa).
+    To upload raw .bdz bytes directly, use ``backend.upload_protocol(name, bytes)``.
+    """
+    expected = self.backend.contract
+    actual   = _CONTRACTS[protocol.variant]
+    if actual is not expected:
+      raise ValueError(
+        f"Protocol targets {protocol.variant.value!r} "
+        f"(params_type={actual.params_type}) but connected backend "
+        f"expects params_type={expected.params_type}"
+      )
+    await self.backend.upload_protocol(name, write_bdz(protocol))
+
+  @need_setup_finished
+  async def download_protocol(self, name: str) -> BdzProtocol:
+    """Download a protocol from instrument memory and return a parsed :class:`BdzProtocol`."""
+    return read_bdz(await self.backend.download_protocol(name))
 
   @property
   def instrument(self) -> Optional[str]:
