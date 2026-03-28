@@ -148,6 +148,11 @@ class InhecoIncubatorShakerStackBackend(MachineBackend):
     vid: int = 0x0403,
     pid: int = 0x6001,
   ):
+    if not HAS_SERIAL:
+      raise RuntimeError(
+        "pyserial is not installed. Install with: pip install pylabrobot[serial]. "
+        f"Import error: {_SERIAL_IMPORT_ERROR}"
+      )
     super().__init__()
 
     self.logger = logging.LoggerAdapter(
@@ -159,6 +164,7 @@ class InhecoIncubatorShakerStackBackend(MachineBackend):
     self.dip_switch_id = dip_switch_id
 
     self.io = Serial(
+      human_readable_device_name="Inheco Incubator Shaker",
       port=port,
       vid=vid,
       pid=pid,
