@@ -961,24 +961,24 @@ class LiquidHandler(Resource, Machine):
     # If the user specified a single resource, but multiple channels to use, we will assume they
     # want to space the channels evenly across the resource. Note that offsets are relative to the
     # center of the resource.
-    if len(set(resources)) == 1:
-      resource = resources[0]
-      resources = [resource] * len(use_channels)
-      if spread == "tight":
-        center_offsets = get_tight_single_resource_liquid_op_offsets(
-          resource=resource, num_channels=len(use_channels)
-        )
-      elif spread == "wide":
-        center_offsets = get_wide_single_resource_liquid_op_offsets(
-          resource=resource, num_channels=len(use_channels)
-        )
-      elif spread == "custom":
-        center_offsets = [Coordinate.zero()] * len(use_channels)
-      else:
-        raise ValueError("Invalid value for 'spread'. Must be 'tight', 'wide', or 'custom'.")
+    #if len(set(resources)) == 1:
+    #  resource = resources[0]
+    #  resources = [resource] * len(use_channels)
+    #  if spread == "tight":
+    #    center_offsets = get_tight_single_resource_liquid_op_offsets(
+    #      resource=resource, num_channels=len(use_channels)
+    #    )
+    #  elif spread == "wide":
+    #    center_offsets = get_wide_single_resource_liquid_op_offsets(
+    #      resource=resource, num_channels=len(use_channels)
+    #    )
+    #  elif spread == "custom":
+    #    center_offsets = [Coordinate.zero()] * len(use_channels)
+    #  else:
+    #    raise ValueError("Invalid value for 'spread'. Must be 'tight', 'wide', or 'custom'.")
 
-      # add user defined offsets to the computed centers
-      offsets = [c + o for c, o in zip(center_offsets, offsets)]
+    # add user defined offsets to the computed centers
+    #offsets = [c + o for c, o in zip(center_offsets, offsets)]
 
     # create operations
     aspirations = [
@@ -1144,24 +1144,24 @@ class LiquidHandler(Resource, Machine):
     # If the user specified a single resource, but multiple channels to use, we will assume they
     # want to space the channels evenly across the resource. Note that offsets are relative to the
     # center of the resource.
-    if len(set(resources)) == 1:
-      resource = resources[0]
-      resources = [resource] * len(use_channels)
-      if spread == "tight":
-        center_offsets = get_tight_single_resource_liquid_op_offsets(
-          resource=resource, num_channels=len(use_channels)
-        )
-      elif spread == "wide":
-        center_offsets = get_wide_single_resource_liquid_op_offsets(
-          resource=resource, num_channels=len(use_channels)
-        )
-      elif spread == "custom":
-        center_offsets = [Coordinate.zero()] * len(use_channels)
-      else:
-        raise ValueError("Invalid value for 'spread'. Must be 'tight', 'wide', or 'custom'.")
+    #if len(set(resources)) == 1:
+    #  resource = resources[0]
+    #  resources = [resource] * len(use_channels)
+    #  if spread == "tight":
+    #    center_offsets = get_tight_single_resource_liquid_op_offsets(
+    #      resource=resource, num_channels=len(use_channels)
+    #    )
+    #  elif spread == "wide":
+    #    center_offsets = get_wide_single_resource_liquid_op_offsets(
+    #      resource=resource, num_channels=len(use_channels)
+    #    )
+    #  elif spread == "custom":
+    #    center_offsets = [Coordinate.zero()] * len(use_channels)
+    #  else:
+    #    raise ValueError("Invalid value for 'spread'. Must be 'tight', 'wide', or 'custom'.")
 
       # add user defined offsets to the computed centers
-      offsets = [c + o for c, o in zip(center_offsets, offsets)]
+    #  offsets = [c + o for c, o in zip(center_offsets, offsets)]
 
     tips = [self.head[channel].get_tip() for channel in use_channels]
 
