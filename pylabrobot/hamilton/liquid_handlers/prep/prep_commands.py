@@ -15,12 +15,12 @@ from dataclasses import dataclass, fields
 from enum import IntEnum
 from typing import Annotated, Optional, Tuple
 
+from pylabrobot.capabilities.liquid_handling.standard import Aspiration
 from pylabrobot.hamilton.tcp.commands import TCPCommand
 from pylabrobot.hamilton.tcp.messages import HoiParams
 from pylabrobot.hamilton.tcp.packets import Address
 from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol
 from pylabrobot.hamilton.tcp.wire_types import (
-  Enum as WEnum,
   F32,
   I8,
   I16,
@@ -37,7 +37,9 @@ from pylabrobot.hamilton.tcp.wire_types import (
   U8Array,
   U32Array,
 )
-from pylabrobot.capabilities.liquid_handling.standard import Aspiration
+from pylabrobot.hamilton.tcp.wire_types import (
+  Enum as WEnum,
+)
 
 # =============================================================================
 # Enums (mirrored from Prep protocol spec)
@@ -1875,6 +1877,9 @@ class PrepIsParked(PrepCommand):
 
   command_id = 34
   action_code = 0  # STATUS_REQUEST
+  action_code = 0  # STATUS_REQUEST
+  action_code = 0  # STATUS_REQUEST
+  action_code = 0  # STATUS_REQUEST
 
   @dataclass(frozen=True)
   class Response:
@@ -1883,9 +1888,11 @@ class PrepIsParked(PrepCommand):
 
 @dataclass
 class PrepIsSpread(PrepCommand):
-  """Query spread status (cmd=35, dest=MLPrep). Firmware yaml: IsSpread(void) -> parked: bool."""
+  """Query spread status (cmd=35, dest=MLPrep). Default **COMMAND_REQUEST**; see :class:`PrepIsParked`."""
 
   command_id = 35
+  action_code = 0  # STATUS_REQUEST
+  action_code = 0  # STATUS_REQUEST
   action_code = 0  # STATUS_REQUEST
 
   @dataclass(frozen=True)
