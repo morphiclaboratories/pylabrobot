@@ -1600,6 +1600,13 @@ class HamiltonIntrospection:
     self._firmware_tree_cache = await self._build_firmware_tree()
     return self._firmware_tree_cache
 
+  async def get_firmware_tree_flat(
+    self, refresh: bool = False
+  ) -> List[Tuple[str, Address, ObjectInfo]]:
+    """Firmware tree as a flat preorder list of ``(path, address, object_info)``."""
+    tree = await self.get_firmware_tree(refresh=refresh)
+    return flatten_firmware_tree(tree)
+
   async def get_supported_interface0_method_ids(self, address: Address) -> Set[int]:
     """Return the set of Interface 0 method IDs this object supports.
 
@@ -1851,7 +1858,8 @@ class HamiltonIntrospection:
 
     Args:
       address: Object address or dot-path (e.g. "MLPrepRoot.MphRoot.MPH").
-      global_pool: Optional GlobalTypePool for resolving source_id=1 refs.
+      global_pool: Optional GlobalTypePool for resolving source_id=1 refs. If omitted,
+        uses :meth:`ensure_global_type_pool` (same as :meth:`_build_minimal_registry_for_signature`).
       _supported: Pre-computed supported Interface 0 method IDs (internal;
         avoids redundant device queries when the caller already has them).
 
@@ -1859,6 +1867,8 @@ class HamiltonIntrospection:
       TypeRegistry with all type information for this object
     """
     address = await self._resolve_target_address(address)
+    if global_pool is None:
+      global_pool = await self.ensure_global_type_pool()
     registry = TypeRegistry(address=address, global_pool=global_pool)
     if _supported is None:
       _supported = await self.get_supported_interface0_method_ids(address)
@@ -1899,7 +1909,8 @@ class HamiltonIntrospection:
       address: Parent object address or dot-path (e.g. "MLPrepRoot.MphRoot.MPH").
       subobject_addresses: Optional list of child addresses to include.
         If None, all direct subobjects are discovered automatically.
-      global_pool: Optional GlobalTypePool for resolving source_id=1 refs.
+      global_pool: Optional GlobalTypePool for resolving source_id=1 refs. If omitted,
+        :meth:`build_type_registry` attaches the session pool automatically.
 
     Returns:
       TypeRegistry that can resolve types from both parent and children.

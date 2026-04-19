@@ -1,43 +1,210 @@
-"""Hamilton Prep CoRe gripper and plate manipulation (PrepCmd via :class:`PrepDriver`)."""
+"""Hamilton Prep CoRe gripper backend (v1 GripperArmBackend) and PrepGripperArm frontend."""
 
 from __future__ import annotations
 
-from typing import Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
-from pylabrobot.hamilton.tcp.packets import Address
-from pylabrobot.legacy.liquid_handling.standard import (
-  GripDirection,
-  ResourceDrop,
-  ResourceMove,
-  ResourcePickup,
-)
-from pylabrobot.resources import Coordinate
-from pylabrobot.resources.deck import Deck
-from pylabrobot.resources.hamilton.hamilton_decks import HamiltonCoreGrippers
+from pylabrobot.capabilities.arms.arm import GripperArm
+from pylabrobot.capabilities.arms.backend import GripperArmBackend
+from pylabrobot.capabilities.arms.standard import GripperLocation
+from pylabrobot.capabilities.capability import BackendParams
+from pylabrobot.resources import Coordinate, Resource
 
 from . import prep_commands as PrepCmd
-from .driver import PrepDriver
-from .pip_backend import PrepPIPBackend
+
+if TYPE_CHECKING:
+  from .driver import PrepDriver
+  from .pip_backend import PrepPIPBackend
 
 
-class PrepCoreGripper:
-  """CoRe tool pickup, plate grip, and moves — uses pipettor interface + optional safe-Z via PIP backend."""
+class PrepCoreGripper(GripperArmBackend):
+  """CoRe gripper backend for Prep — translates v1 arm interface to PrepCmd firmware commands.
 
-  def __init__(self, driver: PrepDriver, deck: Deck, pip: PrepPIPBackend) -> None:
+  Tool management (pick_up_tool / drop_tool) is **not** part of the GripperArmBackend
+  interface — it is handled by the :meth:`Prep.core_grippers` context manager.
+  """
+
+  def __init__(self, driver: PrepDriver, pip: PrepPIPBackend) -> None:
     self._driver = driver
-    self.deck = deck
     self._pip = pip
-    self._gripper_tool_on: bool = False
 
   @property
   def client(self) -> PrepDriver:
     return self._driver
 
-  async def _require(self, name: str) -> Address:
+  async def _require(self, name: str):
     return await self._driver.require_interface(name)
 
-  async def _on_stop(self) -> None:
-    self._gripper_tool_on = False
+  # -- BackendParams for firmware-specific tuning --------------------------------
+  # Geometry fields (resource_length, resource_height, plate_top_z_offset) have SBS
+  # defaults for direct pick_up_at_location() calls.  When called via
+  # PrepGripperArm.pick_up_resource(), these are auto-filled from the actual resource.
+
+  @dataclass
+  class PickUpParams(BackendParams):
+    """Firmware parameters for plate pickup.
+
+    Geometry fields are auto-populated by :class:`PrepGripperArm` when using
+    ``pick_up_resource()``.  Only tuning knobs (``clearance_y``, ``grip_speed_y``,
+    ``squeeze_mm``) normally need to be set by callers.
+    """
+
+    resource_length: float = 127.0
+    resource_height: float = 14.0
+    plate_top_z_offset: float = 0.0
+    clearance_y: float = 2.5
+    grip_speed_y: float = 5.0
+    squeeze_mm: float = 2.0
+
+  @dataclass
+  class DropParams(BackendParams):
+    """Firmware parameters for plate drop."""
+
+    clearance_y: float = 3.0
+    acceleration_scale_x: int = 1
+
+  @dataclass
+  class MoveToLocationParams(BackendParams):
+    """Firmware parameters for moving a held plate."""
+
+    acceleration_scale_x: int = 1
+
+  # -- GripperArmBackend interface -----------------------------------------------
+
+  async def pick_up_at_location(
+    self,
+    location: Coordinate,
+    resource_width: float,
+    backend_params: Optional[BackendParams] = None,
+  ) -> None:
+    """Pick up a plate at the specified location.
+
+    Args:
+      location: Plate center at grip height (x, y, grip_z) in deck coordinates.
+      resource_width: Plate width along the grip axis (Y) in mm.
+      backend_params: :class:`PickUpParams` for firmware-specific settings.
+    """
+    if not isinstance(backend_params, PrepCoreGripper.PickUpParams):
+      backend_params = PrepCoreGripper.PickUpParams()
+
+    plate_top_center = PrepCmd.XYZCoord(
+      default_values=False,
+      x_position=location.x,
+      y_position=location.y,
+      z_position=location.z + backend_params.plate_top_z_offset,
+    )
+    plate_dims = PrepCmd.PlateDimensions(
+      default_values=False,
+      length=backend_params.resource_length,
+      width=resource_width,
+      height=backend_params.resource_height,
+    )
+    grip_distance = backend_params.clearance_y + backend_params.squeeze_mm
+
+    await self._driver.send_command(
+      PrepCmd.PrepPickUpPlate(
+        dest=await self._require("pipettor"),
+        plate_top_center=plate_top_center,
+        plate=plate_dims,
+        clearance_y=backend_params.clearance_y,
+        grip_speed_y=backend_params.grip_speed_y,
+        grip_distance=grip_distance,
+        grip_height=location.z,
+      )
+    )
+
+  async def drop_at_location(
+    self,
+    location: Coordinate,
+    resource_width: float,
+    backend_params: Optional[BackendParams] = None,
+  ) -> None:
+    """Drop a plate at the specified location.
+
+    Args:
+      location: Plate center at place height in deck coordinates.
+      resource_width: Plate width along the grip axis (Y) in mm.
+      backend_params: :class:`DropParams` for firmware-specific settings.
+    """
+    if not isinstance(backend_params, PrepCoreGripper.DropParams):
+      backend_params = PrepCoreGripper.DropParams()
+
+    plate_top_center = PrepCmd.XYZCoord(
+      default_values=False,
+      x_position=location.x,
+      y_position=location.y,
+      z_position=location.z,
+    )
+    await self._driver.send_command(
+      PrepCmd.PrepDropPlate(
+        dest=await self._require("pipettor"),
+        plate_top_center=plate_top_center,
+        clearance_y=backend_params.clearance_y,
+        acceleration_scale_x=backend_params.acceleration_scale_x,
+      )
+    )
+
+  async def move_to_location(
+    self,
+    location: Coordinate,
+    backend_params: Optional[BackendParams] = None,
+  ) -> None:
+    """Move a held plate to a new position without releasing it.
+
+    Args:
+      location: Target plate center position in deck coordinates.
+      backend_params: :class:`MoveToLocationParams` for firmware-specific settings.
+    """
+    if not isinstance(backend_params, PrepCoreGripper.MoveToLocationParams):
+      backend_params = PrepCoreGripper.MoveToLocationParams()
+
+    plate_top_center = PrepCmd.XYZCoord(
+      default_values=False,
+      x_position=location.x,
+      y_position=location.y,
+      z_position=location.z,
+    )
+    await self._driver.send_command(
+      PrepCmd.PrepMovePlate(
+        dest=await self._require("pipettor"),
+        plate_top_center=plate_top_center,
+        acceleration_scale_x=backend_params.acceleration_scale_x,
+      )
+    )
+
+  async def open_gripper(
+    self, gripper_width: float, backend_params: Optional[BackendParams] = None
+  ) -> None:
+    """Release plate / open gripper (PrepReleasePlate, cmd=21)."""
+    await self._driver.send_command(
+      PrepCmd.PrepReleasePlate(dest=await self._require("pipettor"))
+    )
+
+  async def close_gripper(
+    self, gripper_width: float, backend_params: Optional[BackendParams] = None
+  ) -> None:
+    raise NotImplementedError(
+      "PrepCoreGripper does not support close_gripper directly. Use pick_up_at_location instead."
+    )
+
+  async def is_gripper_closed(self, backend_params: Optional[BackendParams] = None) -> bool:
+    raise NotImplementedError("PrepCoreGripper does not support is_gripper_closed")
+
+  async def halt(self, backend_params: Optional[BackendParams] = None) -> None:
+    raise NotImplementedError("PrepCoreGripper does not support halt")
+
+  async def park(self, backend_params: Optional[BackendParams] = None) -> None:
+    raise NotImplementedError(
+      "PrepCoreGripper does not support park. Tool management is handled by Prep.core_grippers()."
+    )
+
+  async def request_gripper_location(
+    self, backend_params: Optional[BackendParams] = None
+  ) -> GripperLocation:
+    raise NotImplementedError("PrepCoreGripper does not support request_gripper_location")
+
+  # -- Tool management (used by Prep.core_grippers context manager) --------------
 
   async def pick_up_tool(
     self,
@@ -51,7 +218,7 @@ class PrepCoreGripper:
     tool_y_radius: float = 2.0,
     tip_definition: Optional[PrepCmd.TipPickupParameters] = None,
   ) -> None:
-    """Pick up tool (PrepCmd.PrepPickUpTool, cmd=15). Moves channels to safe Z after."""
+    """Pick up CoRe gripper tool (PrepPickUpTool, cmd=15). Moves channels to safe Z after."""
     if tool_seek is None:
       tool_seek = tool_position_z + 10.0
     if tip_definition is None:
@@ -69,116 +236,45 @@ class PrepCoreGripper:
         tool_y_radius=tool_y_radius,
       )
     )
-    self._gripper_tool_on = True
     await self._pip.move_channels_to_safe_z()
 
   async def drop_tool(self, *, move_to_safe_z_first: bool = True) -> None:
-    """Drop tool (PrepCmd.PrepDropTool, cmd=16)."""
+    """Drop CoRe gripper tool (PrepDropTool, cmd=16)."""
     if move_to_safe_z_first:
       await self._pip.move_channels_to_safe_z()
-    await self._driver.send_command(PrepCmd.PrepDropTool(dest=await self._require("pipettor")))
-    self._gripper_tool_on = False
+    await self._driver.send_command(
+      PrepCmd.PrepDropTool(dest=await self._require("pipettor"))
+    )
 
-  async def release_plate(self) -> None:
-    """Release plate / open gripper (PrepCmd.PrepReleasePlate, cmd=21)."""
-    await self._driver.send_command(PrepCmd.PrepReleasePlate(dest=await self._require("pipettor")))
+
+class PrepGripperArm(GripperArm):
+  """GripperArm that auto-populates Prep firmware geometry from the target resource.
+
+  When ``pick_up_resource()`` is called, resource dimensions (length, height) and the
+  plate-top Z offset are extracted from the :class:`Resource` automatically.  Users
+  only need to pass firmware tuning knobs (``clearance_y``, ``grip_speed_y``,
+  ``squeeze_mm``) via :class:`PrepCoreGripper.PickUpParams`.
+  """
 
   async def pick_up_resource(
     self,
-    pickup: ResourcePickup,
-    *,
-    clearance_y: float = 2.5,
-    grip_speed_y: float = 5.0,
-    squeeze_mm: float = 2.0,
-  ) -> None:
-    if pickup.direction != GripDirection.FRONT:
-      raise NotImplementedError("PREP CORE gripper only supports GripDirection.FRONT")
-    resource = pickup.resource
-    center = resource.get_location_wrt(self.deck, "c", "c", "t") + pickup.offset
-    grip_height = center.z - pickup.pickup_distance_from_top
-    plate_top_center = PrepCmd.XYZCoord(
-      default_values=False,
-      x_position=center.x,
-      y_position=center.y,
-      z_position=center.z,
-    )
-    grip_distance = clearance_y + squeeze_mm
-    plate_dims = PrepCmd.PlateDimensions(
-      default_values=False,
-      length=resource.get_absolute_size_x(),
-      width=resource.get_absolute_size_y(),
-      height=resource.get_absolute_size_z(),
-    )
-    if not self._gripper_tool_on:
-      mount = self.deck.get_resource("core_grippers")
-      if not isinstance(mount, HamiltonCoreGrippers):
-        raise TypeError(
-          "deck must have a resource named 'core_grippers' of type HamiltonCoreGrippers"
-        )
-      loc = mount.get_location_wrt(self.deck)
-      await self.pick_up_tool(
-        tool_position_x=loc.x,
-        tool_position_z=loc.z,
-        front_channel_position_y=loc.y + mount.front_channel_y_center,
-        rear_channel_position_y=loc.y + mount.back_channel_y_center,
-        tool_seek=loc.z + 10.0,
-      )
-    await self._driver.send_command(
-      PrepCmd.PrepPickUpPlate(
-        dest=await self._require("pipettor"),
-        plate_top_center=plate_top_center,
-        plate=plate_dims,
-        clearance_y=clearance_y,
-        grip_speed_y=grip_speed_y,
-        grip_distance=grip_distance,
-        grip_height=grip_height,
-      )
-    )
+    resource: Resource,
+    offset: Coordinate = Coordinate.zero(),
+    pickup_distance_from_bottom: Optional[float] = None,
+    backend_params: Optional[BackendParams] = None,
+  ):
+    if not isinstance(backend_params, PrepCoreGripper.PickUpParams):
+      backend_params = PrepCoreGripper.PickUpParams()
 
-  async def move_picked_up_resource(self, move: ResourceMove) -> None:
-    center = (
-      move.location
-      + move.resource.get_anchor("c", "c", "t")
-      - Coordinate(z=move.pickup_distance_from_top)
-      + move.offset
-    )
-    plate_top_center = PrepCmd.XYZCoord(
-      default_values=False,
-      x_position=center.x,
-      y_position=center.y,
-      z_position=center.z,
-    )
-    await self._driver.send_command(
-      PrepCmd.PrepMovePlate(
-        dest=await self._require("pipettor"),
-        plate_top_center=plate_top_center,
-        acceleration_scale_x=1,
-      )
-    )
+    # Auto-fill geometry from the actual resource
+    backend_params.resource_length = resource.get_absolute_size_x()
+    backend_params.resource_height = resource.get_absolute_size_z()
 
-  async def drop_resource(
-    self,
-    drop: ResourceDrop,
-    *,
-    return_gripper: bool = True,
-    clearance_y: float = 3.0,
-  ) -> None:
-    resource = drop.resource
-    dest_center = drop.destination + resource.get_anchor("c", "c", "t") + drop.offset
-    place_z = drop.destination.z + resource.get_absolute_size_z() - drop.pickup_distance_from_top
-    plate_top_center = PrepCmd.XYZCoord(
-      default_values=False,
-      x_position=dest_center.x,
-      y_position=dest_center.y,
-      z_position=place_z,
-    )
-    await self._driver.send_command(
-      PrepCmd.PrepDropPlate(
-        dest=await self._require("pipettor"),
-        plate_top_center=plate_top_center,
-        clearance_y=clearance_y,
-        acceleration_scale_x=1,
-      )
-    )
-    if return_gripper:
-      await self.drop_tool()
+    # plate_top_z_offset: how far above the grip point the plate top sits.
+    #   grip point = bottom + pickup_distance_from_bottom
+    #   plate top  = bottom + resource_height
+    #   offset     = resource_height - pickup_distance_from_bottom
+    pdfb = self._resolve_pickup_distance(resource, pickup_distance_from_bottom)
+    backend_params.plate_top_z_offset = resource.get_absolute_size_z() - pdfb
+
+    await super().pick_up_resource(resource, offset, pickup_distance_from_bottom, backend_params)

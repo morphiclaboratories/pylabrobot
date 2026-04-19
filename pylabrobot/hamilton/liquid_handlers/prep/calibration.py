@@ -27,6 +27,7 @@ from . import prep_commands as PrepCmd
 
 if TYPE_CHECKING:
   from .driver import PrepDriver
+  from .info import PrepInstrumentInfo
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,10 @@ class CalibrationCommandReport:
 class PrepCalibration:
   """Calibration façade: firmware MLPrepCalibration object + DeckConfiguration site defs."""
 
-  def __init__(self, driver: PrepDriver) -> None:
+  def __init__(self, driver: PrepDriver, info: "PrepInstrumentInfo") -> None:
     self._driver = driver
+    self._info = info
     self._calibration_session_active: bool = False
-    self._num_channels: Optional[int] = None
-    self._has_mph: bool = False
 
   @property
   def client(self) -> PrepDriver:
@@ -77,13 +77,11 @@ class PrepCalibration:
 
   @property
   def num_channels(self) -> int:
-    if self._num_channels is None:
-      raise RuntimeError("PrepCalibration not configured. Call _on_setup from Prep.setup first.")
-    return self._num_channels
+    return self._info.config.num_channels
 
   @property
   def has_mph(self) -> bool:
-    return self._has_mph
+    return self._info.config.has_mph
 
   def _set_calibration_session_active(self, active: bool) -> None:
     self._calibration_session_active = active
@@ -91,14 +89,13 @@ class PrepCalibration:
   async def _require(self, name: str) -> Address:
     return await self._driver.require_interface(name)
 
-  async def _on_setup(self, *, num_channels: int, has_mph: bool) -> None:
+  async def _on_setup(self) -> None:
     """Called from :meth:`Prep.setup` after :class:`PrepPIPBackend` is ready."""
-    self._num_channels = num_channels
-    self._has_mph = has_mph
+    # info.config raises if not yet populated — treat as the canonical check.
+    _ = self._info.config
 
   async def _on_stop(self) -> None:
     self._calibration_session_active = False
-    self._num_channels = None
 
   def calibration_session(
     self,

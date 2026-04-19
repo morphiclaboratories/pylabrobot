@@ -442,8 +442,8 @@ class TestTransportApiAlignment(unittest.TestCase):
       del refresh
       return tree
 
-    client.get_firmware_tree = fake_get_firmware_tree  # type: ignore[method-assign]
-    got = asyncio.run(client.get_firmware_tree_flat())
+    client.introspection.get_firmware_tree = fake_get_firmware_tree  # type: ignore[method-assign]
+    got = asyncio.run(client.introspection.get_firmware_tree_flat())
     self.assertEqual(len(got), 1)
     self.assertEqual(got[0][0], "Only")
     self.assertEqual(got[0][1], a0)
