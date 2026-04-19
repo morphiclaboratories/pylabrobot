@@ -1,25 +1,10 @@
-"""Hamilton Prep backend implementation.
+"""Hamilton Prep PIP backend.
 
-:class:`PrepPIPBackend` is always constructed with ``prep=self`` from :class:`prep.Prep`. It does
-not keep a separate transport or :class:`~pylabrobot.hamilton.liquid_handlers.prep.info.PrepInstrumentInfo`
-reference: use ``self._prep.driver`` and ``self._prep.info`` (the same objects as
-:attr:`prep.Prep.driver` and :attr:`prep.Prep.info`).
-
-Three-layer design:
-
-- **Transport** (:class:`PrepDriver`, via ``self._prep.driver``): Commands and introspection.
-  All device communication goes through ``self._prep.driver.send_command()``.
-  Address resolution: ``await self._prep.driver.resolve_target(path_or_alias_or_address)``.
-
-- **Command dataclasses** (e.g. ``PrepCmd.PrepDropTips``, ``PrepCmd.MphPickupTips``): Pure wire shapes.
-  Defined in ``prep_commands.py``; ``@dataclass`` with ``dest: Address`` +
-  ``Annotated`` payload fields; ``build_parameters()`` uses ``HoiParams.from_struct(self)``.
-
-- **PrepBackend methods**: Domain logic and defaults.
-  Single source of truth for Prep-specific parameter defaults.
-
-Standalone access: ``await prep.driver.resolve_path("MLPrepRoot.MphRoot.MPH")``,
-``HamiltonIntrospection(prep.driver)`` (or ``lh.backend._prep.driver`` if you only hold the PIP backend).
+:class:`PrepPIPBackend` takes narrow dependencies at construction — the
+:class:`PrepDriver` (transport + JIT firmware-path resolve) and
+:class:`PrepInstrumentInfo` (instrument-wide metadata). It holds no backref
+to :class:`Prep`. Per-channel topology lives in :mod:`.channels`; ``self.channels``
+is populated from :meth:`Prep.setup` before :meth:`_on_setup`.
 """
 
 from __future__ import annotations
@@ -35,15 +20,17 @@ from typing import (
   Literal,
   NamedTuple,
   Optional,
+  Sequence,
   Tuple,
   Union,
+  cast,
 )
 
 if TYPE_CHECKING:
   from pylabrobot.resources.deck import Deck
 
   from .driver import PrepDriver
-  from .prep import Prep
+  from .info import PrepInstrumentInfo
 
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.capabilities.liquid_handling.pip_backend import PIPBackend
@@ -67,6 +54,13 @@ from pylabrobot.resources.trash import Trash
 from pylabrobot.resources.well import CrossSectionType, Well
 
 from . import prep_commands as PrepCmd
+from .driver import PIPETTOR_OBJECT_PATH
+from .channels import (
+  ChannelDriveMap,
+  PrepPIPChannel,
+  discover_channel_drives,
+  request_channel_bounds,
+)
 from .liquid_defaults import fill_in_defaults
 
 logger = logging.getLogger(__name__)
@@ -203,8 +197,7 @@ def _build_container_segments(resource) -> list[PrepCmd.SegmentDescriptor]:
 
 
 def _segments_to_cone_geometry(
-  segments: list[PrepCmd.SegmentDescriptor],
-  fallback_radius: float,
+  segments: list[PrepCmd.SegmentDescriptor], fallback_radius: float
 ) -> Tuple[float, float, float]:
   """Convert v2 frustum segments to v1 cone model (tube_radius, cone_height, cone_bottom_radius).
 
@@ -283,7 +276,7 @@ def _absolute_z_from_well(op, z_air_margin_mm: float = 2.0) -> _WellGeometry:
 
 
 # =============================================================================
-# PrepBackend
+# PrepPIPBackend — channel indices and deck routing
 # =============================================================================
 
 _CHANNEL_INDEX = {
@@ -371,33 +364,12 @@ class _ChannelContext:
   ch_segments: dict[int, list[PrepCmd.SegmentDescriptor]]
 
 
-@dataclass(frozen=True)
-class ChannelDriveMap:
-  """Cached channel-drive topology discovered from the firmware tree."""
-
-  sleeve_sensor_addrs: list[Address]
-  zdrive_addrs: list[Address]
-  node_info_addrs: list[Address]
-
-  @property
-  def num_channels_discovered(self) -> int:
-    return len(self.sleeve_sensor_addrs)
-
-  def to_dict(self) -> dict[str, object]:
-    """Serialize for logs/notebooks that prefer plain dicts."""
-    return {
-      "num_channels_discovered": self.num_channels_discovered,
-      "sleeve_sensor_addrs": list(self.sleeve_sensor_addrs),
-      "zdrive_addrs": list(self.zdrive_addrs),
-      "node_info_addrs": list(self.node_info_addrs),
-    }
-
-
 class PrepPIPBackend(PIPBackend):
-  """PIP backend for Hamilton Prep — port of prep_tcp ``PrepBackend`` with :class:`PrepDriver` transport.
+  """PIP backend for Hamilton Prep.
 
-  Constructed with ``prep=self`` from :class:`prep.Prep`; use ``self._prep.driver`` and
-  ``self._prep.info`` for transport and instrument-wide state (no duplicate driver/info fields).
+  Narrow constructor: ``driver`` (transport + JIT firmware-path resolve) and
+  ``info`` (instrument-wide metadata). ``self.channels`` is attached by
+  :meth:`Prep.setup` before :meth:`_on_setup`.
   """
 
   class LLDMode(enum.Enum):
@@ -422,24 +394,21 @@ class PrepPIPBackend(PIPBackend):
   def __init__(
     self,
     *,
-    prep: "Prep",
+    driver: "PrepDriver",
+    info: "PrepInstrumentInfo",
     deck: Optional["Deck"] = None,
     default_traverse_height: Optional[float] = None,
     use_v1_aspirate_dispense: bool = False,
   ) -> None:
-    """Wire to the :class:`prep.Prep` orchestrator; use ``self._prep.driver`` / ``self._prep.info``."""
-    self._prep = prep
+    self._driver = driver
+    self._info = info
     self.deck = deck
     self._user_traverse_height: Optional[float] = default_traverse_height
-    self._channel_drive_map: Optional[ChannelDriveMap] = None
     self._channel_bounds: list[dict] = []
     self._use_v1_aspirate_dispense: bool = use_v1_aspirate_dispense
     self._supports_v2_pipetting: Optional[bool] = None
     self.setup_finished: bool = False
-
-  def _has_interface(self, name: str) -> bool:
-    """Return True if the interface was resolved and is present."""
-    return self._prep.driver.has_interface(name)
+    self.channels: List[PrepPIPChannel] = []
 
   def set_default_traverse_height(self, value: float) -> None:
     """Set the default traverse height (mm) used when final_z is not passed to pick_up_tips/drop_tips.
@@ -456,8 +425,8 @@ class PrepPIPBackend(PIPBackend):
     all v2 command IDs (38-43) are present. Returns False when the firmware only
     exposes v1 commands (1-6).
     """
-    dest = await self._require("pipettor")
-    methods = await self._prep.driver.introspection.methods_for_interface(dest, interface_id=1)
+    dest = await self._driver.resolve_path(PIPETTOR_OBJECT_PATH)
+    methods = await self._driver.introspection.methods_for_interface(dest, interface_id=1)
     iface1_ids = {m.method_id for m in methods}
     return self._V2_PIPETTING_CMD_IDS.issubset(iface1_ids)
 
@@ -481,49 +450,19 @@ class PrepPIPBackend(PIPBackend):
     return self._supports_v2_pipetting is True
 
   # ---------------------------------------------------------------------------
-  # Setup & interface resolution
+  # Setup
   # ---------------------------------------------------------------------------
 
-  async def _require(self, name: str) -> Address:
-    """Resolve and return an interface address (cached on :class:`PrepDriver`)."""
-    return await self._prep.driver.require_interface(name)
-
   async def _on_setup(self, backend_params: Optional[BackendParams] = None):
-    """Initialize MLPrep, load config, and probe pipettor capabilities.
+    """Read config and probe pipettor capabilities.
 
-    Called from :class:`~pylabrobot.capabilities.liquid_handling.pip.PIP` after
-    :meth:`Prep.setup` has run :meth:`PrepDriver.setup` on ``self._prep.driver`` and attached this
-    backend with ``prep=self``.
-
-    Args:
-      backend_params: Optional :class:`~pylabrobot.hamilton.liquid_handlers.prep.driver.PrepSetupParams`
-        for ``smart`` / ``force_initialize``. If omitted, defaults match :meth:`PrepDriver.setup`.
+    Called from :class:`~pylabrobot.capabilities.liquid_handling.pip.PIP`
+    after ``self.channels`` is populated by :meth:`Prep.setup`. Instrument-
+    level initialization (``MLPrep.Initialize``) runs earlier in
+    :meth:`Prep.setup` — the pipettor sees an already-initialized instrument.
     """
-    from .driver import PrepSetupParams
-
-    if isinstance(backend_params, PrepSetupParams):
-      smart = backend_params.smart
-      force_initialize = backend_params.force_initialize
-    else:
-      smart = True
-      force_initialize = False
-
-    if force_initialize:
-      await self._run_initialize(smart=smart)
-      logger.info("Prep initialization complete (force_initialize=True)")
-    else:
-      try:
-        already = await self._prep.info.is_initialized()
-      except Exception as e:
-        logger.error("GetIsInitialized failed; cannot decide whether to init: %s", e)
-        raise
-      if already:
-        logger.info("MLPrep already initialized, skipping Initialize")
-      else:
-        await self._run_initialize(smart=smart)
-        logger.info("Prep initialization complete")
-
-    cfg = self._prep.info.config
+    del backend_params  # accepted for PIPBackend contract; unused
+    cfg = self._info.config
     logger.info(
       "Hardware config: has_enclosure=%s, safe_speeds=%s, traverse_height=%s, "
       "deck_bounds=%s, deck_sites=%d, waste_sites=%d, num_channels=%s, has_mph=%s",
@@ -537,12 +476,9 @@ class PrepPIPBackend(PIPBackend):
       cfg.has_mph,
     )
 
-    # Cache per-channel movement bounds from firmware
-    try:
-      self._channel_bounds = await self.request_channel_bounds()
-    except Exception as e:
-      logger.warning("Failed to query channel bounds: %s", e)
-      self._channel_bounds = []
+    # Per-channel bounds are attached to ``self.channels`` by build_prep_channels.
+    # Keep a flat list too for legacy call sites that iterate _channel_bounds.
+    self._channel_bounds = [c.bounds for c in self.channels if c.bounds is not None]
     if self._channel_bounds:
       logger.info("Channel bounds: %s", self._channel_bounds)
     else:
@@ -560,7 +496,7 @@ class PrepPIPBackend(PIPBackend):
       if not supported:
         raise RuntimeError(
           "V2 aspirate/dispense commands (cmd 38-43) are not supported by this firmware. "
-          "Pass use_v1_aspirate_dispense=True to PrepBackend to use v1 commands (cmd 1-6) instead."
+          "Pass use_v1_aspirate_dispense=True to PrepPIPBackend to use v1 commands (cmd 1-6) instead."
         )
       self._supports_v2_pipetting = True
       logger.info("V2 aspirate/dispense support: True")
@@ -570,100 +506,13 @@ class PrepPIPBackend(PIPBackend):
   async def _on_stop(self):
     pass
 
-  async def discover_channel_drives(self, *, refresh: bool = False) -> ChannelDriveMap:
-    """Discover and cache detailed per-channel drive addresses from the object tree.
+  async def discover_channel_drives(self) -> ChannelDriveMap:
+    """Re-walk the firmware tree and return a fresh :class:`ChannelDriveMap`.
 
-    This is an advanced/diagnostic operation and is intentionally not part of the
-    default setup flow to keep startup latency low.
-
-    Args:
-      refresh: Force re-discovery even if a cache already exists.
-
-    Returns:
-      A typed snapshot of discovered addresses and counts.
+    Diagnostic helper — channel drive addresses for normal operation are already
+    cached on each :attr:`channels` entry at build time.
     """
-    if not refresh and self._channel_drive_map is not None:
-      return self._channel_drive_map
-
-    # Walk the MLPrepRoot object tree for per-channel drive addresses by name.
-    #   MLPrepRoot -> "Channel Root" -> "Channel" -> "Squeeze" -> "SDrive" (sleeve sensor)
-    #   MLPrepRoot -> "Channel Root" -> "Channel" -> "ZAxis" -> "ZDrive"
-    #   MLPrepRoot -> "Channel Root" -> "NodeInformation"
-    # Box-level objects (MLPrepCpu, ModuleInformation) use resolve_path on ``self._prep.driver`` instead.
-    sleeve_sensor_addrs: list[Address] = []
-    zdrive_addrs: list[Address] = []
-    node_info_addrs: list[Address] = []
-
-    nodes = await self._prep.driver.introspection.get_firmware_tree_flat()
-    if not nodes:
-      self._channel_drive_map = ChannelDriveMap(
-        sleeve_sensor_addrs=[],
-        zdrive_addrs=[],
-        node_info_addrs=[],
-      )
-      return self._channel_drive_map
-
-    indexed: dict[str, Address] = {path: addr for path, addr, _ in nodes}
-
-    for path, sub_addr, _sub_info in nodes:
-      parts = path.split(".")
-      if len(parts) != 2 or parts[-1] != "Channel Root":
-        continue
-
-      channel_path = f"{path}.Channel"
-      if channel_path not in indexed:
-        logger.warning("Channel Root on node %d has no 'Channel' child, skipping", sub_addr.node)
-        continue
-
-      sdrive_addr = indexed.get(f"{channel_path}.Squeeze.SDrive")
-      zdrive_addr = indexed.get(f"{channel_path}.ZAxis.ZDrive")
-      node_info_addr = indexed.get(f"{path}.NodeInformation")
-
-      if sdrive_addr is not None:
-        sleeve_sensor_addrs.append(sdrive_addr)
-      else:
-        logger.warning("Channel Root on node %d: could not find Squeeze.SDrive", sub_addr.node)
-
-      if zdrive_addr is not None:
-        zdrive_addrs.append(zdrive_addr)
-      else:
-        logger.warning("Channel Root on node %d: could not find ZAxis.ZDrive", sub_addr.node)
-
-      if node_info_addr is not None:
-        node_info_addrs.append(node_info_addr)
-      else:
-        logger.warning("Channel Root on node %d: could not find NodeInformation", sub_addr.node)
-
-      logger.debug(
-        "Discovered channel on node %d: sleeve_sensor=%s, ZDrive=%s, NodeInfo=%s",
-        sub_addr.node,
-        sdrive_addr,
-        zdrive_addr,
-        node_info_addr,
-      )
-
-    logger.info("Discovered %d pipettor channel drive pairs", len(sleeve_sensor_addrs))
-    self._channel_drive_map = ChannelDriveMap(
-      sleeve_sensor_addrs=sleeve_sensor_addrs,
-      zdrive_addrs=zdrive_addrs,
-      node_info_addrs=node_info_addrs,
-    )
-    return self._channel_drive_map
-
-  async def _run_initialize(self, smart: bool):
-    """Send PrepCmd.PrepInitialize to MLPrep (shared by setup)."""
-    await self._prep.driver.send_command(
-      PrepCmd.PrepInitialize(
-        dest=await self._require("mlprep"),
-        smart=smart,
-        tip_drop_params=PrepCmd.InitTipDropParameters(
-          default_values=True,
-          x_position=287.0,
-          rolloff_distance=3,
-          channel_parameters=[],
-        ),
-      )
-    )
+    return await discover_channel_drives(self._driver, root_name="Channel Root")
 
   # ---------------------------------------------------------------------------
   # Properties
@@ -672,13 +521,16 @@ class PrepPIPBackend(PIPBackend):
   @property
   def num_channels(self) -> int:
     """Number of independent dual-channel pipettor channels (1 or 2). Read from info.config."""
-    return self._prep.info.config.num_channels
+    n = self._info.config.num_channels
+    if n is None:
+      raise RuntimeError("Instrument config has no num_channels (finish Prep.setup first).")
+    return n
 
   @property
   def has_mph(self) -> bool:
     """True if the 8-channel Multi-Pipetting Head (8MPH) is present. Read from info.config."""
     try:
-      return bool(self._prep.info.config.has_mph)
+      return bool(self._info.config.has_mph)
     except RuntimeError:
       return False
 
@@ -688,7 +540,7 @@ class PrepPIPBackend(PIPBackend):
     if self.deck is None:
       return 0
     try:
-      cfg = self._prep.info.config
+      cfg = self._info.config
     except RuntimeError:
       return 0
     if cfg.num_channels != 2:
@@ -706,7 +558,7 @@ class PrepPIPBackend(PIPBackend):
     if self._user_traverse_height is not None:
       return self._user_traverse_height
     try:
-      cfg = self._prep.info.config
+      cfg = self._info.config
     except RuntimeError:
       cfg = None
     if cfg is not None and cfg.default_traverse_height is not None:
@@ -714,7 +566,7 @@ class PrepPIPBackend(PIPBackend):
     raise RuntimeError(
       "Default traverse height is required for this operation but could not be determined. "
       "Either pass final_z explicitly to this call, or set it via "
-      "PrepBackend(..., default_traverse_height=<mm>) or backend.set_default_traverse_height(<mm>). "
+      "PrepPIPBackend(..., default_traverse_height=<mm>) or backend.set_default_traverse_height(<mm>). "
       "If the instrument supports it, the value is also probed during setup(); ensure setup() completed successfully."
     ) from None
 
@@ -723,10 +575,7 @@ class PrepPIPBackend(PIPBackend):
   # ---------------------------------------------------------------------------
 
   async def pick_up_tips(
-    self,
-    ops: List[Pickup],
-    use_channels: List[int],
-    backend_params: Optional[BackendParams] = None,
+    self, ops: List[Pickup], use_channels: List[int], backend_params: Optional[BackendParams] = None
   ):
     """Pick up tips.
 
@@ -766,10 +615,7 @@ class PrepPIPBackend(PIPBackend):
       op = indexed_ops[ch]
       loc = op.resource.get_absolute_location("c", "c", "t")
       params = PrepCmd.TipPositionParameters.for_op(
-        _CHANNEL_INDEX[ch],
-        loc,
-        op.resource.get_tip(),
-        z_seek_offset=z_seek_offset,
+        _CHANNEL_INDEX[ch], loc, op.resource.get_tip(), z_seek_offset=z_seek_offset
       )
       tip_positions.append(params)
 
@@ -785,9 +631,8 @@ class PrepPIPBackend(PIPBackend):
       is_tool=False,
     )
 
-    await self._prep.driver.send_command(
+    await self._driver.send_command(
       PrepCmd.PrepPickUpTips(
-        dest=await self._require("pipettor"),
         tip_positions=tip_positions,
         final_z=resolved_final_z,
         seek_speed=seek_speed,
@@ -850,6 +695,10 @@ class PrepPIPBackend(PIPBackend):
       op = indexed_ops[ch]
       tip = op.tip
       if all_trash:
+        if self.deck is None:
+          raise ValueError(
+            "Cannot drop tips to waste: backend has no deck (assign a deck before drop_tips)."
+          )
         waste_name = _CHANNEL_TO_WASTE_NAME.get(ch, "waste_mph")
         if not self.deck.has_resource(waste_name):
           raise ValueError(
@@ -860,17 +709,12 @@ class PrepPIPBackend(PIPBackend):
       else:
         loc = op.resource.get_absolute_location("c", "c", "t") + op.offset
       params = PrepCmd.TipDropParameters.for_op(
-        _CHANNEL_INDEX[ch],
-        loc,
-        tip,
-        z_seek_offset=z_seek_offset,
-        drop_type=resolved_drop_type,
+        _CHANNEL_INDEX[ch], loc, tip, z_seek_offset=z_seek_offset, drop_type=resolved_drop_type
       )
       tip_positions.append(params)
 
-    await self._prep.driver.send_command(
+    await self._driver.send_command(
       PrepCmd.PrepDropTips(
-        dest=await self._require("pipettor"),
         tip_positions=tip_positions,
         final_z=resolved_final_z,
         seek_speed=seek_speed,
@@ -945,9 +789,8 @@ class PrepPIPBackend(PIPBackend):
       is_tool=False,
     )
 
-    await self._prep.driver.send_command(
+    await self._driver.send_command(
       PrepCmd.MphPickupTips(
-        dest=await self._require("mph"),
         tip_parameters=tip_parameters,
         final_z=resolved_final_z,
         seek_speed=seek_speed,
@@ -999,16 +842,11 @@ class PrepPIPBackend(PIPBackend):
     tip = ref_spot.get_tip()
     loc = ref_spot.get_absolute_location("c", "c", "t")
     drop_parameters = PrepCmd.TipDropParameters.for_op(
-      PrepCmd.ChannelIndex.MPHChannel,
-      loc,
-      tip,
-      z_seek_offset=z_seek_offset,
-      drop_type=drop_type,
+      PrepCmd.ChannelIndex.MPHChannel, loc, tip, z_seek_offset=z_seek_offset, drop_type=drop_type
     )
 
-    await self._prep.driver.send_command(
+    await self._driver.send_command(
       PrepCmd.MphDropTips(
-        dest=await self._require("mph"),
         drop_parameters=drop_parameters,
         final_z=resolved_final_z,
         seek_speed=seek_speed,
@@ -1022,8 +860,7 @@ class PrepPIPBackend(PIPBackend):
 
   @staticmethod
   def _patch_common_with_cone(
-    common: PrepCmd.CommonParameters,
-    segments: list[PrepCmd.SegmentDescriptor],
+    common: PrepCmd.CommonParameters, segments: list[PrepCmd.SegmentDescriptor]
   ) -> PrepCmd.CommonParameters:
     """Return a copy of CommonParameters with cone geometry derived from segments.
 
@@ -1126,9 +963,7 @@ class PrepPIPBackend(PIPBackend):
 
   @staticmethod
   def _lld_for_well(
-    effective_lld: bool,
-    lld: Optional[PrepCmd.LldParameters],
-    top_of_well_z: float,
+    effective_lld: bool, lld: Optional[PrepCmd.LldParameters], top_of_well_z: float
   ) -> PrepCmd.LldParameters:
     """Per-channel LLD seek parameters from caller override or well geometry."""
     if effective_lld and lld is None:
@@ -1147,7 +982,7 @@ class PrepPIPBackend(PIPBackend):
 
   def _resolve_channel_context(
     self,
-    ops: List[_ChannelLiquidOp],
+    ops: Sequence[_ChannelLiquidOp],
     use_channels: List[int],
     *,
     z_final: Optional[List[float]] = None,
@@ -1302,17 +1137,15 @@ class PrepPIPBackend(PIPBackend):
         continue
       idx = ctx.ch_to_idx[ch]
       op = ctx.indexed_ops[ch]
-      loc = op.resource.get_absolute_location("c", "c", "cavity_bottom")
-      radius = _effective_radius(op.resource)
+      asp = cast(Aspiration, op)
+      loc = asp.resource.get_absolute_location("c", "c", "cavity_bottom")
+      radius = _effective_radius(asp.resource)
 
       kits.append(
         _AspirateChannelKit(
           channel=_CHANNEL_INDEX[ch],
           aspirate=PrepCmd.AspirateParameters.for_op(
-            loc,
-            op,
-            prewet_volume=prewet_volume[idx],
-            blowout_volume=blowout_volumes[idx],
+            loc, asp, prewet_volume=prewet_volume[idx], blowout_volume=blowout_volumes[idx]
           ),
           common=PrepCmd.CommonParameters.for_op(
             ctx.volumes[idx],
@@ -1326,9 +1159,7 @@ class PrepPIPBackend(PIPBackend):
           ),
           segments=ctx.ch_segments[ch],
           no_lld=PrepCmd.NoLldParameters.for_fixed_z(
-            ctx.z_fluid[idx],
-            ctx.z_air[idx],
-            z_bottom_search_offset=ctx.z_bottom_search_offset[idx],
+            ctx.z_fluid[idx], ctx.z_air[idx], z_bottom_search_offset=ctx.z_bottom_search_offset[idx]
           ),
           lld=self._lld_for_well(effective_lld, lld, ctx.well_geometry[idx].top_of_well),
           p_lld=lld_defaults.p_lld,
@@ -1343,9 +1174,7 @@ class PrepPIPBackend(PIPBackend):
 
   @staticmethod
   def _assemble_aspirate_v2(
-    kit: _AspirateChannelKit,
-    effective_lld: bool,
-    is_tadm: bool,
+    kit: _AspirateChannelKit, effective_lld: bool, is_tadm: bool
   ) -> Union[
     PrepCmd.AspirateParametersLldAndTadm2,
     PrepCmd.AspirateParametersLldAndMonitoring2,
@@ -1407,10 +1236,7 @@ class PrepPIPBackend(PIPBackend):
       )
 
   def _assemble_aspirate_v1(
-    self,
-    kit: _AspirateChannelKit,
-    effective_lld: bool,
-    is_tadm: bool,
+    self, kit: _AspirateChannelKit, effective_lld: bool, is_tadm: bool
   ) -> Union[
     PrepCmd.AspirateParametersLldAndTadm,
     PrepCmd.AspirateParametersLldAndMonitoring,
@@ -1489,12 +1315,11 @@ class PrepPIPBackend(PIPBackend):
     read_timeout: Optional[float] = None,
   ) -> None:
     """Assemble the correct param types and send the aspirate command."""
-    dest = await self._require("pipettor")
     cmd_cls = self._ASPIRATE_CMD[(effective_lld, is_tadm, use_v2)]
     assembler = self._assemble_aspirate_v2 if use_v2 else self._assemble_aspirate_v1
     params = [assembler(k, effective_lld, is_tadm) for k in kits]
-    await self._prep.driver.send_command(
-      cmd_cls(dest=dest, aspirate_parameters=params),  # type: ignore[arg-type]
+    await self._driver.send_command(
+      cmd_cls(aspirate_parameters=params),  # type: ignore[arg-type]
       read_timeout=read_timeout if effective_lld else None,
     )
 
@@ -1578,9 +1403,7 @@ class PrepPIPBackend(PIPBackend):
         _DispenseChannelKit(
           channel=_CHANNEL_INDEX[ch],
           dispense=PrepCmd.DispenseParameters.for_op(
-            loc,
-            stop_back_volume=stop_back_volume[idx],
-            cutoff_speed=cutoff_speed[idx],
+            loc, stop_back_volume=stop_back_volume[idx], cutoff_speed=cutoff_speed[idx]
           ),
           common=PrepCmd.CommonParameters.for_op(
             ctx.volumes[idx],
@@ -1594,9 +1417,7 @@ class PrepPIPBackend(PIPBackend):
           ),
           segments=ctx.ch_segments[ch],
           no_lld=PrepCmd.NoLldParameters.for_fixed_z(
-            ctx.z_fluid[idx],
-            ctx.z_air[idx],
-            z_bottom_search_offset=ctx.z_bottom_search_offset[idx],
+            ctx.z_fluid[idx], ctx.z_air[idx], z_bottom_search_offset=ctx.z_bottom_search_offset[idx]
           ),
           lld=self._lld_for_well(effective_lld, lld, ctx.well_geometry[idx].top_of_well),
           c_lld=lld_defaults.c_lld,
@@ -1609,8 +1430,7 @@ class PrepPIPBackend(PIPBackend):
 
   @staticmethod
   def _assemble_dispense_v2(
-    kit: _DispenseChannelKit,
-    effective_lld: bool,
+    kit: _DispenseChannelKit, effective_lld: bool
   ) -> Union[PrepCmd.DispenseParametersLld2, PrepCmd.DispenseParametersNoLld2]:
     """Assemble a v2 dispense parameter struct from pre-resolved kit values."""
     if effective_lld:
@@ -1640,9 +1460,7 @@ class PrepPIPBackend(PIPBackend):
       )
 
   def _assemble_dispense_v1(
-    self,
-    kit: _DispenseChannelKit,
-    effective_lld: bool,
+    self, kit: _DispenseChannelKit, effective_lld: bool
   ) -> Union[PrepCmd.DispenseParametersLld, PrepCmd.DispenseParametersNoLld]:
     """Assemble a v1 dispense parameter struct (cone-patched, no segments)."""
     patched = self._patch_common_with_cone(kit.common, kit.segments)
@@ -1686,12 +1504,11 @@ class PrepPIPBackend(PIPBackend):
     read_timeout: Optional[float] = None,
   ) -> None:
     """Assemble the correct param types and send the dispense command."""
-    dest = await self._require("pipettor")
     cmd_cls = self._DISPENSE_CMD[(effective_lld, use_v2)]
     assembler = self._assemble_dispense_v2 if use_v2 else self._assemble_dispense_v1
     params = [assembler(k, effective_lld) for k in kits]
-    await self._prep.driver.send_command(
-      cmd_cls(dest=dest, dispense_parameters=params),  # type: ignore[arg-type]
+    await self._driver.send_command(
+      cmd_cls(dispense_parameters=params),  # type: ignore[arg-type]
       read_timeout=read_timeout if effective_lld else None,
     )
 
@@ -1846,10 +1663,7 @@ class PrepPIPBackend(PIPBackend):
 
     _DISPENSE_ALLOWED_LLD = frozenset({self.LLDMode.CAPACITIVE})
     effective_lld = self._resolve_effective_lld(
-      lld_mode,
-      lld,
-      len(ops),
-      allowed_modes=_DISPENSE_ALLOWED_LLD,
+      lld_mode, lld, len(ops), allowed_modes=_DISPENSE_ALLOWED_LLD
     )
     use_v2 = self._resolve_command_version(command_version)
 
@@ -1897,7 +1711,7 @@ class PrepPIPBackend(PIPBackend):
     if tip.tip_size in {TipSize.XL}:
       return False
     try:
-      n = self._prep.info.config.num_channels
+      n = self._info.config.num_channels
     except RuntimeError:
       n = None
     if n is not None and channel_idx >= n:
@@ -1909,111 +1723,23 @@ class PrepPIPBackend(PIPBackend):
   # ---------------------------------------------------------------------------
 
   async def request_pip_channel_version(self, channel: int) -> Optional[str]:
-    """Request the firmware version string for a pipettor channel.
-
-    Args:
-      channel: Channel index (0=rearmost).
-
-    Analogous to STARBackend.request_pip_channel_version().
-    """
-    drive_map = await self.discover_channel_drives()
-    if channel >= len(drive_map.node_info_addrs):
+    """Firmware version string for pipettor channel (0=rearmost)."""
+    if channel >= len(self.channels):
       return None
-    return await self._prep.driver._query_firmware_string(
-      drive_map.node_info_addrs[channel], cmd_id=8, iface_id=1
-    )
-
-  async def request_pip_channel_serial_number(self, channel: int) -> Optional[str]:
-    """Request the serial number for a pipettor channel.
-
-    Args:
-      channel: Channel index (0=rearmost).
-    """
-    drive_map = await self.discover_channel_drives()
-    if channel >= len(drive_map.node_info_addrs):
-      return None
-    return await self._prep.driver._query_firmware_string(
-      drive_map.node_info_addrs[channel], cmd_id=9, iface_id=1
-    )
+    return await self.channels[channel].request_firmware_version()
 
   # ---------------------------------------------------------------------------
   # Channel position queries
   # ---------------------------------------------------------------------------
 
   async def request_channel_bounds(self) -> list[dict]:
-    """Request per-channel movement bounds from the firmware.
+    """Per-channel movement bounds (PipettorService.GetChannelBounds).
 
-    Queries PipettorService.GetChannelBounds (cmd=10). Returns one entry per
-    channel, ordered by channel index. Each entry is a dict with keys:
-    x_min, x_max, y_min, y_max, z_min, z_max (all in mm).
-
-    These are the firmware-enforced limits — positions outside these ranges
-    will be rejected with 0x0F04 (X), 0x0F05 (Y), or 0x0F06 (Z).
-    Z bounds are for empty channels; with a tip attached the effective Z
-    minimum is higher.
-
-    Returns:
-      List of dicts, one per channel. Each dict has keys:
-      x_min, x_max, y_min, y_max, z_min, z_max (all in mm).
+    Thin delegation to :func:`~pylabrobot.hamilton.liquid_handlers.prep.channels.request_channel_bounds`.
+    Prefer reading cached values via ``self.channels[i].bounds``; use this when a
+    fresh re-query is required.
     """
-    import struct as _struct
-
-    # GetChannelBounds is on PipettorService (child of Pipettor), not MLPrepService
-    try:
-      pip_svc = await self._prep.driver.resolve_path("MLPrepRoot.PipettorRoot.Pipettor.PipettorService")
-    except KeyError:
-      return []
-
-    raw = await self._prep.driver.send_command(
-      PrepCmd.PrepGetChannelBounds(dest=pip_svc),
-      return_raw=True,
-      raise_on_error=False,
-    )
-    if raw is None:
-      return []
-
-    # Parse per-channel bounds from raw response.
-    # Each channel block: channel_enum (u32 at 0x20), then 6× f32 (at 0x28):
-    # x_min, x_max, y_min, y_max, z_min, z_max
-    data = raw[0]
-    _CHANNEL_ENUM_TO_IDX = {v: k for k, v in _CHANNEL_INDEX.items()}
-    indexed = []
-
-    i = 0
-    while i < len(data) - 20:
-      if data[i] == 0x20 and data[i + 1] == 0x00 and data[i + 2] == 0x04:
-        ch_val = _struct.unpack_from("<I", data, i + 4)[0]
-        ch_idx = _CHANNEL_ENUM_TO_IDX.get(ch_val)
-
-        j = i + 8
-        floats: list[float] = []
-        while len(floats) < 6 and j < len(data) - 7:
-          if data[j] == 0x28 and data[j + 1] == 0x00:
-            floats.append(_struct.unpack_from("<f", data, j + 4)[0])
-            j += 8
-          else:
-            j += 1
-
-        if ch_idx is not None and len(floats) == 6:
-          indexed.append(
-            (
-              ch_idx,
-              {
-                "x_min": floats[0],
-                "x_max": floats[1],
-                "y_min": floats[2],
-                "y_max": floats[3],
-                "z_min": floats[4],
-                "z_max": floats[5],
-              },
-            )
-          )
-        i = j
-      else:
-        i += 1
-
-    indexed.sort(key=lambda pair: pair[0])
-    return [bounds for _, bounds in indexed]
+    return await request_channel_bounds(self._driver)
 
   async def request_channel_positions(self) -> list[Coordinate]:
     """Request the current XYZ positions of all pipettor channels.
@@ -2027,10 +1753,7 @@ class PrepPIPBackend(PIPBackend):
     Returns:
       List of Coordinate, one per channel.
     """
-    resp = await self._prep.driver.send_command(
-      PrepCmd.PrepGetPositions(dest=await self._require("pipettor")),
-      raise_on_error=False,
-    )
+    resp = await self._driver.send_command(PrepCmd.PrepGetPositions(), raise_on_error=False)
     if resp is None or not resp.positions:
       return []
 
@@ -2164,14 +1887,13 @@ class PrepPIPBackend(PIPBackend):
       # Query firmware for the held tip definition to get tip length
       Cmd = type(
         "_GetTipDefHeld",
-        (PrepCmd._PrepStatusQuery,),
-        {"command_id": 13, "__annotations__": {"dest": Address}},
+        (PrepCmd.PrepStatusRequest,),
+        cast(
+          dict[str, Any],
+          {"command_id": 13, "__annotations__": {"dest": Address}},
+        ),
       )
-      raw = await self._prep.driver.send_command(
-        Cmd(dest=await self._require("pipettor")),
-        return_raw=True,
-        raise_on_error=False,
-      )
+      raw = await self._driver.send_command(Cmd(), return_raw=True, raise_on_error=False)
       if raw is not None:
         import struct as _struct
 
@@ -2281,14 +2003,13 @@ class PrepPIPBackend(PIPBackend):
     for addr in drive_map.sleeve_sensor_addrs:
       Cmd = type(
         "_GetTipPresent",
-        (PrepCmd._PrepStatusQuery,),
-        {"command_id": 15, "__annotations__": {"dest": Address}},
+        (PrepCmd.PrepStatusRequest,),
+        cast(
+          dict[str, Any],
+          {"command_id": 15, "__annotations__": {"dest": Address}},
+        ),
       )
-      raw = await self._prep.driver.send_command(
-        Cmd(dest=addr),
-        return_raw=True,
-        raise_on_error=False,
-      )
+      raw = await self._driver.send_command(Cmd(dest=addr), return_raw=True, raise_on_error=False)
       if raw is None or len(raw[0]) < 8:
         results.append(False)
       else:
@@ -2314,7 +2035,7 @@ class PrepPIPBackend(PIPBackend):
     an X equivalent, though none was found in introspection.
     """
     raise NotImplementedError(
-      "clld_probe_x_position_using_channel is not yet implemented for PrepBackend."
+      "clld_probe_x_position_using_channel is not yet implemented for PrepPIPBackend."
     )
 
   async def clld_probe_y_position_using_channel(self, *args, **kwargs):
@@ -2326,7 +2047,7 @@ class PrepPIPBackend(PIPBackend):
     which suggest Y-axis seeking capability.
     """
     raise NotImplementedError(
-      "clld_probe_y_position_using_channel is not yet implemented for PrepBackend."
+      "clld_probe_y_position_using_channel is not yet implemented for PrepPIPBackend."
     )
 
   async def clld_probe_z_height_using_channel(self, *args, **kwargs):
@@ -2354,7 +2075,7 @@ class PrepPIPBackend(PIPBackend):
     - PipettorService.MeasureLldFrequency [1:6] for sensor health checks
     """
     raise NotImplementedError(
-      "clld_probe_z_height_using_channel is not yet implemented for PrepBackend."
+      "clld_probe_z_height_using_channel is not yet implemented for PrepPIPBackend."
     )
 
   async def ztouch_probe_z_height_using_channel(self, *args, **kwargs):
@@ -2369,7 +2090,7 @@ class PrepPIPBackend(PIPBackend):
       but it was not found in introspection.
     """
     raise NotImplementedError(
-      "ztouch_probe_z_height_using_channel is not yet implemented for PrepBackend."
+      "ztouch_probe_z_height_using_channel is not yet implemented for PrepPIPBackend."
     )
 
   # ---------------------------------------------------------------------------
@@ -2396,12 +2117,7 @@ class PrepPIPBackend(PIPBackend):
       f"channel index out of range (valid: 0..{self.num_channels - 1})"
     )
     channel_enums = [_CHANNEL_INDEX[ch] for ch in channels]
-    await self._prep.driver.send_command(
-      PrepCmd.PrepMoveZUpToSafe(
-        dest=await self._require("pipettor"),
-        channels=channel_enums,
-      )
-    )
+    await self._driver.send_command(PrepCmd.PrepMoveZUpToSafe(channels=channel_enums))
 
   async def move_to_position(
     self,
@@ -2457,32 +2173,19 @@ class PrepPIPBackend(PIPBackend):
       z_i = z if isinstance(z, (int, float)) else z[i]
       axis_parameters.append(
         PrepCmd.ChannelYZMoveParameters(
-          default_values=False,
-          channel=_CHANNEL_INDEX[ch],
-          y_position=y_i,
-          z_position=z_i,
+          default_values=False, channel=_CHANNEL_INDEX[ch], y_position=y_i, z_position=z_i
         )
       )
     move_parameters = PrepCmd.GantryMoveXYZParameters(
-      default_values=False,
-      gantry_x_position=x,
-      axis_parameters=axis_parameters,
+      default_values=False, gantry_x_position=x, axis_parameters=axis_parameters
     )
 
     if via_lane:
-      await self._prep.driver.send_command(
-        PrepCmd.PrepMoveToPositionViaLane(
-          dest=await self._require("pipettor"),
-          move_parameters=move_parameters,
-        )
+      await self._driver.send_command(
+        PrepCmd.PrepMoveToPositionViaLane(move_parameters=move_parameters)
       )
     else:
-      await self._prep.driver.send_command(
-        PrepCmd.PrepMoveToPosition(
-          dest=await self._require("pipettor"),
-          move_parameters=move_parameters,
-        )
-      )
+      await self._driver.send_command(PrepCmd.PrepMoveToPosition(move_parameters=move_parameters))
 
   async def stop(self) -> None:
     self.setup_finished = False

@@ -1,4 +1,4 @@
-"""Prep device: orchestrates transport, instrument info, PIP backend, PIP capability, and calibration."""
+"""Prep device: orchestrates transport, instrument info, and peer construction."""
 
 import asyncio
 import logging
@@ -14,8 +14,9 @@ from pylabrobot.resources.hamilton.hamilton_decks import HamiltonCoreGrippers
 
 from . import prep_commands as PrepCmd
 from .calibration import PrepCalibration
+from .channels import build_prep_channels
 from .chatterbox import PrepChatterboxDriver, PrepChatterboxInstrumentInfo
-from .core import PrepCoreGripper, PrepGripperArm
+from .core import PrepCoreGripper, PrepCoreGripperFactory, PrepGripperArm
 from .driver import PrepDriver, PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
@@ -27,14 +28,9 @@ logger = logging.getLogger(__name__)
 class Prep(Device):
   """Hamilton Prep liquid handler.
 
-  The deck is fixed at construction; ``setup`` takes optional :class:`~driver.PrepSetupParams`
-  for driver/pip options only. :class:`~pylabrobot.hamilton.liquid_handlers.prep.driver.PrepDriver` is
-  **transport only** (no pip backend field). Instrument-wide state lives on :attr:`info`
-  (:class:`~pylabrobot.hamilton.liquid_handlers.prep.info.PrepInstrumentInfo`). In :meth:`setup`,
-  ``Prep`` constructs :class:`~pylabrobot.hamilton.liquid_handlers.prep.pip_backend.PrepPIPBackend`
-  with ``prep=self``; the pip backend reads transport and metadata only via ``self._prep.driver`` and
-  ``self._prep.info`` (the same objects as :attr:`driver` and :attr:`info`).
-  Setup order: transport → ``info._on_setup`` → ``PrepPIPBackend`` + :class:`~pylabrobot.capabilities.liquid_handling.pip.PIP` → calibration.
+  Setup constructs peers (``pip``, ``method``, ``calibration``, core-gripper factory)
+  directly. Firmware paths live on each :class:`PrepCommand` subclass and are
+  resolved JIT by :meth:`PrepDriver.send_command`.
   """
 
   def __init__(
@@ -53,17 +49,14 @@ class Prep(Device):
     super().__init__(driver=driver)
     self.driver: PrepDriver = driver
     self.deck = deck
-    self.info = (
-      PrepChatterboxInstrumentInfo(driver) if chatterbox else PrepInstrumentInfo(driver)
-    )
-    self.method = PrepMethodLifecycle(driver)
-    self.pip: PIP  # set in setup()
-    self.calibration: PrepCalibration  # set in setup()
+    self.info = PrepChatterboxInstrumentInfo(driver) if chatterbox else PrepInstrumentInfo(driver)
     self._core_gripper_arm: Optional[PrepGripperArm] = None
+    self.pip: Optional[PIP] = None
+    self.method: Optional[PrepMethodLifecycle] = None
+    self.calibration: Optional[PrepCalibration] = None
+    self._core_factory: Optional[PrepCoreGripperFactory] = None
 
-  def _normalize_setup_params(
-    self, backend_params: Optional[BackendParams]
-  ) -> PrepSetupParams:
+  def _normalize_setup_params(self, backend_params: Optional[BackendParams]) -> PrepSetupParams:
     if backend_params is None:
       return PrepSetupParams()
     if isinstance(backend_params, PrepSetupParams):
@@ -74,27 +67,61 @@ class Prep(Device):
     )
 
   async def setup(self, backend_params: Optional[BackendParams] = None):
-    """Connect and resolve interfaces, then wire info, pip backend, PIP capability, and calibration."""
+    """Connect, bootstrap info, initialize MLPrep, construct peers."""
     params = self._normalize_setup_params(backend_params)
     try:
       await self.driver.setup(backend_params=params)
       await self.info._on_setup()
+      await self._initialize_instrument(params)
+
+      self.method = PrepMethodLifecycle(self.driver)
+      self.calibration = PrepCalibration(driver=self.driver, info=self.info)
       pip_backend = PrepPIPBackend(
-        prep=self,
+        driver=self.driver,
+        info=self.info,
         deck=self.deck,
         default_traverse_height=params.default_traverse_height,
         use_v1_aspirate_dispense=params.use_v1_aspirate_dispense,
       )
+      pip_backend.channels = await build_prep_channels(self.driver, self.info)
       self.pip = PIP(backend=pip_backend)
+      await self.pip._on_setup()
+      self._core_factory = PrepCoreGripperFactory(driver=self.driver)
+
       self._capabilities = [self.pip]
-      await self.pip._on_setup(backend_params=params)
-      self.calibration = PrepCalibration(driver=self.driver, info=self.info)
-      await self.calibration._on_setup()
       self._setup_finished = True
     except Exception:
       await self.info._on_stop()
       await self.driver.stop()
       raise
+
+  async def _initialize_instrument(self, params: PrepSetupParams) -> None:
+    """Send ``MLPrep.Initialize`` when needed."""
+    if not params.force_initialize:
+      try:
+        already = await self.info.is_initialized()
+      except Exception as e:
+        logger.error("GetIsInitialized failed; cannot decide whether to init: %s", e)
+        raise
+      if already:
+        logger.info("MLPrep already initialized, skipping Initialize")
+        return
+
+    await self.driver.send_command(
+      PrepCmd.PrepInitialize(
+        smart=params.smart,
+        tip_drop_params=PrepCmd.InitTipDropParameters(
+          default_values=True,
+          x_position=287.0,
+          rolloff_distance=3,
+          channel_parameters=[],
+        ),
+      )
+    )
+    logger.info(
+      "Prep initialization complete%s",
+      " (force_initialize=True)" if params.force_initialize else "",
+    )
 
   async def stop(self):
     if not self._setup_finished:
@@ -106,11 +133,15 @@ class Prep(Device):
         "Call `await prep.return_core_grippers()` first if you want the tools returned."
       )
       self._core_gripper_arm = None
-    await self.calibration._on_stop()
-    for cap in reversed(self._capabilities):
-      await cap._on_stop()
+    if self.pip is not None:
+      await self.pip._on_stop()
     await self.driver.stop()
     await self.info._on_stop()
+    self._capabilities = []
+    self.pip = None
+    self.method = None
+    self.calibration = None
+    self._core_factory = None
     self._setup_finished = False
 
   # -- CoRe grippers -----------------------------------------------------------
@@ -127,20 +158,14 @@ class Prep(Device):
 
   @property
   def core_grippers_mounted(self) -> bool:
-    """Whether the CoRe gripper tools are currently picked up."""
     return self._core_gripper_arm is not None
 
   async def pick_up_core_grippers(self) -> PrepGripperArm:
-    """Pick up the CoRe gripper tools and return the mounted arm.
-
-    The arm is also accessible via :attr:`core_gripper_arm` until
-    :meth:`return_core_grippers` is called.  Splits cleanly across Jupyter cells.
-
-    Raises:
-      RuntimeError: if grippers are already mounted.
-    """
+    """Pick up the CoRe gripper tools and return the mounted arm."""
     if self._core_gripper_arm is not None:
       raise RuntimeError("CoRe grippers already mounted")
+    if self._core_factory is None or self.pip is None:
+      raise RuntimeError("Prep.setup() has not run.")
 
     mount = self.deck.get_resource("core_grippers")
     if not isinstance(mount, HamiltonCoreGrippers):
@@ -149,7 +174,9 @@ class Prep(Device):
       )
 
     loc = mount.get_location_wrt(self.deck)
-    backend = PrepCoreGripper(driver=self.driver, pip=self.pip.backend)
+    pip_backend = self.pip.backend
+    assert isinstance(pip_backend, PrepPIPBackend)
+    backend = self._core_factory.build_backend(pip=pip_backend)
 
     await backend.pick_up_tool(
       tool_position_x=loc.x,
@@ -165,7 +192,6 @@ class Prep(Device):
     return self._core_gripper_arm
 
   async def return_core_grippers(self) -> None:
-    """Return the CoRe gripper tools.  Idempotent — safe to call when not mounted."""
     if self._core_gripper_arm is None:
       return
     backend = self._core_gripper_arm.backend
@@ -177,17 +203,6 @@ class Prep(Device):
 
   @asynccontextmanager
   async def core_grippers(self) -> AsyncIterator[PrepGripperArm]:
-    """Context manager that picks up CoRe gripper tools on enter, returns on exit.
-
-    Convenience wrapper around :meth:`pick_up_core_grippers` /
-    :meth:`return_core_grippers`.  For Jupyter-style split-cell workflows, call
-    those methods directly instead.
-
-    Usage::
-
-      async with prep.core_grippers() as arm:
-        await arm.move_resource(plate, destination)
-    """
     arm = await self.pick_up_core_grippers()
     try:
       yield arm
@@ -197,65 +212,41 @@ class Prep(Device):
   # -- Motion, power, lights (MLPrep via driver transport) --------------------
 
   async def park(self) -> None:
-    """Park the instrument."""
-    d = self.driver
-    await d.send_command(PrepCmd.PrepPark(dest=await d.require_interface("mlprep")))
+    await self.driver.send_command(PrepCmd.PrepPark())
 
   async def spread(self) -> None:
-    """Spread channels."""
-    d = self.driver
-    await d.send_command(PrepCmd.PrepSpread(dest=await d.require_interface("mlprep")))
+    await self.driver.send_command(PrepCmd.PrepSpread())
 
   async def is_parked(self) -> bool:
-    """Whether MLPrep is parked."""
-    d = self.driver
-    result = await d.send_command(PrepCmd.PrepIsParked(dest=await d.require_interface("mlprep")))
+    result = await self.driver.send_command(PrepCmd.PrepIsParked())
     if result is None:
       return False
     return bool(result.value)
 
   async def is_spread(self) -> bool:
-    """Whether channels are spread."""
-    d = self.driver
-    result = await d.send_command(PrepCmd.PrepIsSpread(dest=await d.require_interface("mlprep")))
+    result = await self.driver.send_command(PrepCmd.PrepIsSpread())
     if result is None:
       return False
     return bool(result.value)
 
   async def power_down_request(self) -> None:
-    """Request power down (instrument will prepare for shutdown; use cancel_power_down to abort)."""
-    d = self.driver
-    await d.send_command(PrepCmd.PrepPowerDownRequest(dest=await d.require_interface("mlprep")))
+    await self.driver.send_command(PrepCmd.PrepPowerDownRequest())
 
   async def confirm_power_down(self) -> None:
-    """Confirm power down (completes shutdown; only call when safe to power off)."""
-    d = self.driver
-    await d.send_command(PrepCmd.PrepConfirmPowerDown(dest=await d.require_interface("mlprep")))
+    await self.driver.send_command(PrepCmd.PrepConfirmPowerDown())
 
   async def cancel_power_down(self) -> None:
-    """Cancel a pending power-down request."""
-    d = self.driver
-    await d.send_command(PrepCmd.PrepCancelPowerDown(dest=await d.require_interface("mlprep")))
+    await self.driver.send_command(PrepCmd.PrepCancelPowerDown())
 
   async def get_deck_light(self) -> Tuple[int, int, int, int]:
-    """Get the current deck LED colour (white, red, green, blue)."""
-    d = self.driver
-    result = await d.send_command(PrepCmd.PrepGetDeckLight(dest=await d.require_interface("mlprep")))
+    result = await self.driver.send_command(PrepCmd.PrepGetDeckLight())
     if result is None:
       raise ValueError("No response from GetDeckLight.")
     return (result.white, result.red, result.green, result.blue)
 
   async def set_deck_light(self, white: int, red: int, green: int, blue: int) -> None:
-    """Set the deck LED colour."""
-    d = self.driver
-    await d.send_command(
-      PrepCmd.PrepSetDeckLight(
-        dest=await d.require_interface("mlprep"),
-        white=white,
-        red=red,
-        green=green,
-        blue=blue,
-      )
+    await self.driver.send_command(
+      PrepCmd.PrepSetDeckLight(white=white, red=red, green=green, blue=blue)
     )
 
   async def disco_mode(self) -> None:

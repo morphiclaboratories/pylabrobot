@@ -18,6 +18,17 @@ if TYPE_CHECKING:
   from .pip_backend import PrepPIPBackend
 
 
+class PrepCoreGripperFactory:
+  """Lightweight factory: ``Prep`` constructs one at setup and calls
+  :meth:`build_backend` when tools are picked up."""
+
+  def __init__(self, driver: "PrepDriver") -> None:
+    self._driver = driver
+
+  def build_backend(self, pip: "PrepPIPBackend") -> "PrepCoreGripper":
+    return PrepCoreGripper(driver=self._driver, pip=pip)
+
+
 class PrepCoreGripper(GripperArmBackend):
   """CoRe gripper backend for Prep — translates v1 arm interface to PrepCmd firmware commands.
 
@@ -25,16 +36,13 @@ class PrepCoreGripper(GripperArmBackend):
   interface — it is handled by the :meth:`Prep.core_grippers` context manager.
   """
 
-  def __init__(self, driver: PrepDriver, pip: PrepPIPBackend) -> None:
+  def __init__(self, *, driver: "PrepDriver", pip: "PrepPIPBackend") -> None:
     self._driver = driver
     self._pip = pip
 
   @property
-  def client(self) -> PrepDriver:
+  def client(self):
     return self._driver
-
-  async def _require(self, name: str):
-    return await self._driver.require_interface(name)
 
   # -- BackendParams for firmware-specific tuning --------------------------------
   # Geometry fields (resource_length, resource_height, plate_top_z_offset) have SBS
@@ -104,7 +112,6 @@ class PrepCoreGripper(GripperArmBackend):
 
     await self._driver.send_command(
       PrepCmd.PrepPickUpPlate(
-        dest=await self._require("pipettor"),
         plate_top_center=plate_top_center,
         plate=plate_dims,
         clearance_y=backend_params.clearance_y,
@@ -138,7 +145,6 @@ class PrepCoreGripper(GripperArmBackend):
     )
     await self._driver.send_command(
       PrepCmd.PrepDropPlate(
-        dest=await self._require("pipettor"),
         plate_top_center=plate_top_center,
         clearance_y=backend_params.clearance_y,
         acceleration_scale_x=backend_params.acceleration_scale_x,
@@ -167,7 +173,6 @@ class PrepCoreGripper(GripperArmBackend):
     )
     await self._driver.send_command(
       PrepCmd.PrepMovePlate(
-        dest=await self._require("pipettor"),
         plate_top_center=plate_top_center,
         acceleration_scale_x=backend_params.acceleration_scale_x,
       )
@@ -177,9 +182,7 @@ class PrepCoreGripper(GripperArmBackend):
     self, gripper_width: float, backend_params: Optional[BackendParams] = None
   ) -> None:
     """Release plate / open gripper (PrepReleasePlate, cmd=21)."""
-    await self._driver.send_command(
-      PrepCmd.PrepReleasePlate(dest=await self._require("pipettor"))
-    )
+    await self._driver.send_command(PrepCmd.PrepReleasePlate())
 
   async def close_gripper(
     self, gripper_width: float, backend_params: Optional[BackendParams] = None
@@ -225,7 +228,6 @@ class PrepCoreGripper(GripperArmBackend):
       tip_definition = PrepCmd.CO_RE_GRIPPER_TIP_PICKUP_PARAMETERS
     await self._driver.send_command(
       PrepCmd.PrepPickUpTool(
-        dest=await self._require("pipettor"),
         tip_definition=tip_definition,
         tool_position_x=tool_position_x,
         tool_position_z=tool_position_z,
@@ -242,9 +244,7 @@ class PrepCoreGripper(GripperArmBackend):
     """Drop CoRe gripper tool (PrepDropTool, cmd=16)."""
     if move_to_safe_z_first:
       await self._pip.move_channels_to_safe_z()
-    await self._driver.send_command(
-      PrepCmd.PrepDropTool(dest=await self._require("pipettor"))
-    )
+    await self._driver.send_command(PrepCmd.PrepDropTool())
 
 
 class PrepGripperArm(GripperArm):

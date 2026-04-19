@@ -3,20 +3,23 @@
 Canonical holder of device-wide metadata. ``PrepInstrumentInfo`` owns the
 cached ``InstrumentConfig`` snapshot (loaded in :meth:`_on_setup`), exposes its
 fields as sync properties, and performs on-demand diagnostic / firmware queries
-via the driver transport (``require_interface``, ``send_command``,
-``PrepDriver._lazy_diag_address``, ``PrepDriver._query_firmware_string``).
+via the driver transport (``resolve_path``, ``send_command``,
+``PrepDriver._query_firmware_string``).
 
-User-facing instrument-wide pool: ``prep.info``. :class:`~pylabrobot.hamilton.liquid_handlers.prep.pip_backend.PrepPIPBackend`
-is built with ``prep=self`` and uses ``self._prep.info`` for the same object (config and instrument queries).
-``PrepCalibration`` still receives ``info=self.info`` from ``Prep``.
+Info is a **bootstrap** phase — it runs before peers are constructed, so it
+resolves the handful of firmware paths it needs itself via
+:attr:`PrepInstrumentInfo._paths` + ``_require`` / ``_try_require``.
+
+User-facing instrument-wide pool: ``prep.info``.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, ClassVar, Dict, Optional, Tuple
 
 from pylabrobot.hamilton.tcp.introspection import FirmwareTree
+from pylabrobot.hamilton.tcp.packets import Address
 
 from . import prep_commands as PrepCmd
 
@@ -29,9 +32,32 @@ logger = logging.getLogger(__name__)
 class PrepInstrumentInfo:
   """Owns the cached ``InstrumentConfig`` + async instrument-metadata queries."""
 
+  # Firmware paths PrepInstrumentInfo touches. Bootstrap-phase — needed before
+  # peers are constructed — so info resolves them itself via
+  # ``driver.resolve_path`` (backed by the introspection registry's path cache).
+  _paths: ClassVar[Dict[str, str]] = {
+    "mlprep_service": "MLPrepRoot.MLPrepService",
+    "deck_config": "MLPrepRoot.MLPrepCalibration.DeckConfiguration",
+    "mlprep_cpu": "MLPrepRoot.MLPrepCpu",
+    "module_information": "MLPrepRoot.PipettorRoot.ModuleInformation",
+  }
+
   def __init__(self, driver: "PrepDriver"):
     self._driver = driver
     self._config: Optional[PrepCmd.InstrumentConfig] = None
+
+  async def _require(self, key: str) -> Address:
+    """Resolve a diagnostic path alias; raises if absent."""
+    if key not in self._paths:
+      raise KeyError(f"unknown info path key: {key!r}")
+    return await self._driver.resolve_path(self._paths[key])
+
+  async def _try_require(self, key: str) -> Optional[Address]:
+    """Resolve a diagnostic path alias; returns ``None`` if the path is absent."""
+    try:
+      return await self._require(key)
+    except (KeyError, RuntimeError, TypeError):
+      return None
 
   # -- Lifecycle --------------------------------------------------------------
 
@@ -53,11 +79,17 @@ class PrepInstrumentInfo:
 
   @property
   def num_channels(self) -> int:
-    return self.config.num_channels
+    n = self.config.num_channels
+    if n is None:
+      raise RuntimeError("Instrument config has no num_channels (finish Prep.setup first).")
+    return n
 
   @property
   def has_mph(self) -> bool:
-    return self.config.has_mph
+    h = self.config.has_mph
+    if h is None:
+      raise RuntimeError("Instrument config has no has_mph (finish Prep.setup first).")
+    return h
 
   @property
   def deck_bounds(self) -> Optional[PrepCmd.DeckBounds]:
@@ -93,10 +125,10 @@ class PrepInstrumentInfo:
   async def get_present_channels(self) -> Optional[Tuple[PrepCmd.ChannelIndex, ...]]:
     """Query which channels are present (GetPresentChannels on MLPrepService)."""
     d = self._driver
-    if not d.has_interface("mlprep_service"):
+    service_addr = await self._try_require("mlprep_service")
+    if service_addr is None:
       return None
     try:
-      service_addr = await d.require_interface("mlprep_service")
       resp = await d.send_command(PrepCmd.PrepGetPresentChannels(dest=service_addr))
       if resp is None or not getattr(resp, "channels", None):
         return None
@@ -120,7 +152,7 @@ class PrepInstrumentInfo:
   async def _load_instrument_config(self) -> PrepCmd.InstrumentConfig:
     """Aggregate MLPrep, DeckConfiguration, and MLPrepService into ``InstrumentConfig``."""
     d = self._driver
-    mlprep = await d.require_interface("mlprep")
+    mlprep = d.mlprep_address
     enc_resp = await d.send_command(PrepCmd.PrepGetIsEnclosurePresent(dest=mlprep))
     safe_resp = await d.send_command(PrepCmd.PrepGetSafeSpeedsEnabled(dest=mlprep))
     height_resp = await d.send_command(PrepCmd.PrepGetDefaultTraverseHeight(dest=mlprep))
@@ -131,7 +163,9 @@ class PrepInstrumentInfo:
     deck_bounds: Optional[PrepCmd.DeckBounds] = None
     deck_sites: Tuple[PrepCmd.DeckSiteInfo, ...] = ()
     waste_sites: Tuple[PrepCmd.WasteSiteInfo, ...] = ()
-    deck_addr = await d.require_interface("deck_config")
+    deck_addr = await self._try_require("deck_config")
+    if deck_addr is None:
+      raise RuntimeError("DeckConfiguration path did not resolve — cannot load instrument config")
 
     bounds_resp = await d.send_command(PrepCmd.PrepGetDeckBounds(dest=deck_addr))
     if bounds_resp:
@@ -201,7 +235,7 @@ class PrepInstrumentInfo:
   async def is_initialized(self) -> bool:
     """Whether MLPrep reports as initialized (GetIsInitialized, cmd=2)."""
     result = await self._driver.send_command(
-      PrepCmd.PrepGetIsInitialized(dest=await self._driver.require_interface("mlprep"))
+      PrepCmd.PrepGetIsInitialized(dest=self._driver.mlprep_address)
     )
     if result is None:
       return False
@@ -210,7 +244,7 @@ class PrepInstrumentInfo:
   async def get_tip_and_needle_definitions(self) -> Tuple[PrepCmd.TipDefinition, ...]:
     """Tip/needle definitions (GetTipAndNeedleDefinitions, cmd=11)."""
     result = await self._driver.send_command(
-      PrepCmd.PrepGetTipAndNeedleDefinitions(dest=await self._driver.require_interface("mlprep"))
+      PrepCmd.PrepGetTipAndNeedleDefinitions(dest=self._driver.mlprep_address)
     )
     if result is None or not getattr(result, "definitions", None):
       return ()
@@ -219,31 +253,25 @@ class PrepInstrumentInfo:
   # -- Firmware string queries (orchestration; decode on PrepDriver) ----------
 
   async def get_firmware_version(self) -> Optional[str]:
-    addr = await self._driver._lazy_diag_address("mlprep_cpu")
+    addr = await self._try_require("mlprep_cpu")
     if addr is None:
       return None
     return await self._driver._query_firmware_string(addr, cmd_id=8)
 
   async def get_device_serial_number(self) -> Optional[str]:
-    addr = await self._driver._lazy_diag_address("mlprep_cpu")
+    addr = await self._try_require("mlprep_cpu")
     if addr is None:
       return None
     return await self._driver._query_firmware_string(addr, cmd_id=9)
 
   async def get_bootloader_version(self) -> Optional[str]:
-    addr = await self._driver._lazy_diag_address("mlprep_cpu")
+    addr = await self._try_require("mlprep_cpu")
     if addr is None:
       return None
     return await self._driver._query_firmware_string(addr, cmd_id=2, iface_id=2)
 
-  async def get_module_version(self) -> Optional[str]:
-    addr = await self._driver._lazy_diag_address("module_information")
-    if addr is None:
-      return None
-    return await self._driver._query_firmware_string(addr, cmd_id=8)
-
   async def get_module_part_number(self) -> Optional[str]:
-    addr = await self._driver._lazy_diag_address("module_information")
+    addr = await self._try_require("module_information")
     if addr is None:
       return None
     return await self._driver._query_firmware_string(addr, cmd_id=5)

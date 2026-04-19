@@ -11,8 +11,9 @@ from pylabrobot.hamilton.tcp.introspection import HamiltonIntrospection, MethodI
 from pylabrobot.hamilton.tcp.packets import Address
 
 from . import prep_commands as PrepCmd
-from .driver import PREP_LAZY_RESOLVE_PATHS, PrepDriver, PrepResolvedInterfaces, PrepSetupParams
+from .driver import MLPREP_OBJECT_PATH, PIPETTOR_OBJECT_PATH, PrepDriver, PrepSetupParams
 from .info import PrepInstrumentInfo
+from .prep_commands import PrepCommand
 
 logger = logging.getLogger(__name__)
 
@@ -99,35 +100,26 @@ class PrepChatterboxDriver(PrepDriver):
     params = backend_params if isinstance(backend_params, PrepSetupParams) else PrepSetupParams()
     self._use_v1_aspirate_dispense = params.use_v1_aspirate_dispense
 
-    # Canned addresses — must match path resolution order used in real setup.
-    self._resolved_interfaces = {
-      "mlprep": Address(1, 1, 256),
-      "pipettor": Address(1, 1, 257),
-      "coordinator": Address(1, 1, 258),
-      "calibration": Address(1, 1, 259),
-      "deck_config": Address(1, 1, 260),
-      "mph": Address(1, 1, 261),
-      "mlprep_service": Address(1, 1, 262),
-    }
-    self._pipettor_addr = self._resolved_interfaces["pipettor"]
-    self._prep_resolved = PrepResolvedInterfaces.from_resolution_map(self._resolved_interfaces)
-
-    # PREP_LAZY_RESOLVE_PATHS: seed registry so resolve_path / _lazy_diag_address work offline.
-    _chatterbox_lazy_diag = {
-      "mlprep_cpu": (Address(1, 1, 270), "MLPrepCpu"),
-      "module_information": (Address(1, 1, 271), "ModuleInformation"),
-    }
-    for key, (addr, oname) in _chatterbox_lazy_diag.items():
+    # Seed the introspection registry with every firmware path the codebase
+    # may touch. The seed list is derived from the command aggregate
+    # (PrepCommand._ALL_PATHS) plus PrepInstrumentInfo._paths — new commands
+    # with new firmware_path values get chatterbox parity for free. Addresses
+    # are assigned deterministically in sorted-path order so they're stable
+    # across runs.
+    seed_paths = sorted(PrepCommand._ALL_PATHS | set(PrepInstrumentInfo._paths.values()))
+    for idx, path in enumerate(seed_paths):
+      leaf = path.rsplit(".", 1)[-1]
+      addr = Address(1, 1, 256 + idx)
       self.registry.register(
-        PREP_LAZY_RESOLVE_PATHS[key],
-        ObjectInfo(name=oname, version="", method_count=0, subobject_count=0, address=addr),
+        path,
+        ObjectInfo(name=leaf, version="", method_count=0, subobject_count=0, address=addr),
       )
+    self._pipettor_addr = await self.resolve_path(PIPETTOR_OBJECT_PATH)
+    self._mlprep_address = await self.resolve_path(MLPREP_OBJECT_PATH)
 
   async def stop(self):
-    self._resolved_interfaces.clear()
-    self._prep_resolved = None
-    self._lazy_diag_cache.clear()
     self._pipettor_addr = None
+    self._mlprep_address = None
     self._invalidate_introspection_session()
 
   async def send_command(
@@ -139,6 +131,26 @@ class PrepChatterboxDriver(PrepDriver):
     read_timeout: Optional[float] = None,
   ) -> Any:
     del ensure_connection, raise_on_error, read_timeout
+    # Exercise the JIT resolve path so that missing firmware paths surface
+    # the same error offline as they would against hardware.
+    from .prep_commands import _UNRESOLVED, PrepCommand
+
+    if isinstance(command, PrepCommand) and command.dest == _UNRESOLVED:
+      path = type(command).firmware_path
+      if path is None:
+        raise RuntimeError(
+          f"{type(command).__name__} has no firmware_path declared and no "
+          "explicit dest= supplied at construction."
+        )
+      try:
+        addr = await self.resolve_path(path)
+      except KeyError as exc:
+        raise RuntimeError(
+          f"Cannot send {type(command).__name__}: firmware path "
+          f"{path!r} did not resolve on this instrument ({exc})."
+        ) from exc
+      command.dest = addr
+      command.dest_address = addr
     logger.info("[Prep chatterbox] %s", command.__class__.__name__)
     if return_raw:
       return (b"",)

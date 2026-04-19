@@ -1,13 +1,22 @@
-from .calibration import CalibrationCommandReport, PrepCalibration, PrepCalibrationSession
-from .chatterbox import PrepChatterboxDriver, PrepChatterboxInstrumentInfo
-from .core import PrepCoreGripper, PrepGripperArm
-from .driver import (
-  PREP_LAZY_RESOLVE_PATHS,
-  PrepDriver,
-  PrepInterfaceSpec,
-  PrepResolvedInterfaces,
-  PrepSetupParams,
+from .calibration import (
+  CalibrationCommandReport,
+  PrepCalibration,
+  PrepCalibrationSession,
 )
+from .channels import (
+  ChannelDriveMap,
+  PrepPIPChannel,
+  build_prep_channels,
+  discover_channel_drives,
+  request_channel_bounds,
+)
+from .chatterbox import PrepChatterboxDriver, PrepChatterboxInstrumentInfo
+from .core import (
+  PrepCoreGripper,
+  PrepCoreGripperFactory,
+  PrepGripperArm,
+)
+from .driver import PrepDriver, PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
 from .pip_backend import (
@@ -21,23 +30,26 @@ from .prep import Prep
 
 __all__ = [
   "CalibrationCommandReport",
+  "ChannelDriveMap",
   "Prep",
   "PrepCalibration",
   "PrepCalibrationSession",
-  "PREP_LAZY_RESOLVE_PATHS",
   "PrepChatterboxDriver",
   "PrepChatterboxInstrumentInfo",
   "PrepCoreGripper",
-  "PrepGripperArm",
+  "PrepCoreGripperFactory",
   "PrepDriver",
+  "PrepGripperArm",
   "PrepInstrumentInfo",
-  "PrepInterfaceSpec",
   "PrepMethodLifecycle",
-  "PrepResolvedInterfaces",
   "PrepPIPAspirateParams",
+  "PrepPIPBackend",
+  "PrepPIPChannel",
   "PrepPIPDispenseParams",
   "PrepPIPDropTipsParams",
   "PrepPIPPickUpTipsParams",
-  "PrepPIPBackend",
   "PrepSetupParams",
+  "build_prep_channels",
+  "discover_channel_drives",
+  "request_channel_bounds",
 ]

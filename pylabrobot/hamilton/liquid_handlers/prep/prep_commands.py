@@ -2,7 +2,7 @@
 
 Pure data definitions for the Hamilton Prep protocol — enums, hardware config,
 wire-type annotated parameter structs, and PrepCommand subclasses. No business
-logic; used by PrepBackend for command construction and serialization.
+logic; used by PrepPIPBackend and related peers for command construction and serialization.
 
 Moved from prep_backend.py to separate protocol contracts from domain logic.
 """
@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import datetime
 import math
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import IntEnum
-from typing import Annotated, Optional, Tuple
+from typing import Annotated, ClassVar, Optional, Set, Tuple
 
 from pylabrobot.capabilities.liquid_handling.standard import Aspiration
 from pylabrobot.hamilton.tcp.commands import TCPCommand
@@ -1224,20 +1224,45 @@ class DispenseParametersLld2:
 # =============================================================================
 
 
+# Sentinel meaning "dest not supplied — resolve firmware_path JIT at send time."
+# PrepDriver.send_command detects this and replaces it with the resolved Address
+# before delegating to the base TCP layer. Using a real Address sentinel (rather
+# than None) keeps TCPCommand.__init__ happy without any additional branching.
+_UNRESOLVED = Address(-1, -1, -1)
+
+
 @dataclass
 class PrepCommand(TCPCommand):
   """Base for all Prep instrument commands.
 
-  Subclasses are dataclasses with ``dest: Address`` (inherited) plus any
-  ``Annotated`` payload fields.  ``build_parameters()`` calls
-  ``HoiParams.from_struct(self)`` which serialises only ``Annotated`` fields,
-  so ``dest`` is automatically excluded from the wire payload.
+  Subclasses are dataclasses with optional ``dest: Address`` (kw-only,
+  defaulted) plus any ``Annotated`` payload fields.  ``build_parameters()``
+  calls ``HoiParams.from_struct(self)`` which serialises only ``Annotated``
+  fields, so ``dest`` is automatically excluded from the wire payload.
+
+  Firmware target is declared via the class-level ``firmware_path`` attribute;
+  ``PrepDriver.send_command`` resolves it JIT. Polymorphic-dest commands (e.g.
+  ``PrepGetPositions`` on MPH vs pipettor) can set ``firmware_path = None``
+  and require callers to pass an explicit ``dest=``.
   """
 
   protocol = HamiltonProtocol.OBJECT_DISCOVERY
   interface_id = 1
 
-  dest: Address
+  # Declared by each concrete subclass. None means "caller must supply dest=".
+  firmware_path: ClassVar[Optional[str]] = None
+
+  # Aggregates populated by ``__init_subclass__`` at import time (unique paths for chatterbox seeding).
+  _ALL_PATHS: ClassVar[Set[str]] = set()
+
+  dest: Address = field(default=_UNRESOLVED, kw_only=True)
+
+  def __init_subclass__(cls, **kwargs):
+    super().__init_subclass__(**kwargs)
+    path = cls.__dict__.get("firmware_path")
+    if path is None:
+      return
+    PrepCommand._ALL_PATHS.add(path)
 
   def __post_init__(self):
     super().__init__(self.dest)
@@ -1270,6 +1295,18 @@ class PrepCommand(TCPCommand):
     return entry_index
 
 
+@dataclass
+class PrepStatusRequest(PrepCommand):
+  """Base for Prep commands that use HOI STATUS_REQUEST (``action_code == 0``).
+
+  Subclasses target various firmware objects (Pipettor, MLPrep, MLPrepService,
+  DeckConfiguration, calibration, etc.). Responses still use the default
+  ``response_required=True`` in :meth:`TCPCommand.build`.
+  """
+
+  action_code = 0
+
+
 # =============================================================================
 # Pipettor / ChannelCoordinator command classes
 # =============================================================================
@@ -1280,6 +1317,7 @@ class PrepAspirateNoLldMonitoring(PrepCommand):
   """Aspirate without LLD or monitoring (cmd=1, dest=Pipettor)."""
 
   command_id = 1
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersNoLldAndMonitoring], StructArray()]
 
 
@@ -1288,6 +1326,7 @@ class PrepAspirateTadm(PrepCommand):
   """Aspirate with TADM, no LLD (cmd=2, dest=Pipettor)."""
 
   command_id = 2
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersNoLldAndTadm], StructArray()]
 
 
@@ -1296,6 +1335,7 @@ class PrepAspirateWithLld(PrepCommand):
   """Aspirate with LLD and monitoring (cmd=3, dest=Pipettor)."""
 
   command_id = 3
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersLldAndMonitoring], StructArray()]
 
 
@@ -1304,6 +1344,7 @@ class PrepAspirateWithLldTadm(PrepCommand):
   """Aspirate with LLD and TADM (cmd=4, dest=Pipettor)."""
 
   command_id = 4
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersLldAndTadm], StructArray()]
 
 
@@ -1312,6 +1353,7 @@ class PrepDispenseNoLld(PrepCommand):
   """Dispense without LLD (cmd=5, dest=Pipettor)."""
 
   command_id = 5
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   dispense_parameters: Annotated[list[DispenseParametersNoLld], StructArray()]
 
 
@@ -1320,6 +1362,7 @@ class PrepDispenseWithLld(PrepCommand):
   """Dispense with LLD (cmd=6, dest=Pipettor)."""
 
   command_id = 6
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   dispense_parameters: Annotated[list[DispenseParametersLld], StructArray()]
 
 
@@ -1328,6 +1371,7 @@ class PrepDispenseInitToWaste(PrepCommand):
   """Dispense initialize to waste (cmd=7, dest=Pipettor)."""
 
   command_id = 7
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   waste_parameters: Annotated[list[DispenseInitToWasteParameters], StructArray()]
 
 
@@ -1336,6 +1380,7 @@ class PrepPickUpTipsById(PrepCommand):
   """Pick up tips by tip-definition ID (cmd=8, dest=Pipettor)."""
 
   command_id = 8
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   tip_positions: Annotated[list[TipPositionParameters], StructArray()]
   final_z: F32
   seek_speed: F32
@@ -1350,6 +1395,7 @@ class PrepPickUpTips(PrepCommand):
   """Pick up tips by tip-definition struct (cmd=9, dest=Pipettor)."""
 
   command_id = 9
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   tip_positions: Annotated[list[TipPositionParameters], StructArray()]
   final_z: F32
   seek_speed: F32
@@ -1364,6 +1410,7 @@ class PrepPickUpNeedlesById(PrepCommand):
   """Pick up needles by tip-definition ID (cmd=10, dest=Pipettor)."""
 
   command_id = 10
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   tip_positions: Annotated[list[TipPositionParameters], StructArray()]
   final_z: F32
   seek_speed: F32
@@ -1380,6 +1427,7 @@ class PrepPickUpNeedles(PrepCommand):
   """Pick up needles by tip-definition struct (cmd=11, dest=Pipettor)."""
 
   command_id = 11
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   tip_positions: Annotated[list[TipPositionParameters], StructArray()]
   final_z: F32
   seek_speed: F32
@@ -1396,6 +1444,7 @@ class PrepDropTips(PrepCommand):
   """Drop tips (cmd=12, dest=Pipettor)."""
 
   command_id = 12
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   tip_positions: Annotated[list[TipDropParameters], StructArray()]
   final_z: F32
   seek_speed: F32
@@ -1418,6 +1467,7 @@ class MphPickupTips(PrepCommand):
   """
 
   command_id = 9
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
   tip_parameters: Annotated[TipPositionParameters, Struct()]
   final_z: F32
   seek_speed: F32
@@ -1440,6 +1490,7 @@ class MphDropTips(PrepCommand):
   """
 
   command_id = 12
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
   drop_parameters: Annotated[TipDropParameters, Struct()]
   final_z: F32
   seek_speed: F32
@@ -1451,6 +1502,7 @@ class PrepPickUpToolById(PrepCommand):
   """Pick up tool by tip-definition ID (cmd=14, dest=Pipettor)."""
 
   command_id = 14
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   tip_definition_id: PaddedU8
   tool_position_x: F32
   tool_position_z: F32
@@ -1466,6 +1518,7 @@ class PrepPickUpTool(PrepCommand):
   """Pick up tool by tip-definition struct (cmd=15, dest=Pipettor)."""
 
   command_id = 15
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   tip_definition: Annotated[TipPickupParameters, Struct()]
   tool_position_x: F32
   tool_position_z: F32
@@ -1481,6 +1534,7 @@ class PrepDropTool(PrepCommand):
   """Drop tool (cmd=16, dest=Pipettor)."""
 
   command_id = 16
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
 
 
 @dataclass
@@ -1488,6 +1542,7 @@ class PrepPickUpPlate(PrepCommand):
   """Pick up plate (cmd=17, dest=Pipettor)."""
 
   command_id = 17
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   plate_top_center: Annotated[XYZCoord, Struct()]
   plate: Annotated[PlateDimensions, Struct()]
   clearance_y: F32
@@ -1501,6 +1556,7 @@ class PrepDropPlate(PrepCommand):
   """Drop plate (cmd=18, dest=Pipettor)."""
 
   command_id = 18
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   plate_top_center: Annotated[XYZCoord, Struct()]
   clearance_y: F32
   acceleration_scale_x: PaddedU8
@@ -1511,6 +1567,7 @@ class PrepMovePlate(PrepCommand):
   """Move plate to position (cmd=19, dest=Pipettor)."""
 
   command_id = 19
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   plate_top_center: Annotated[XYZCoord, Struct()]
   acceleration_scale_x: PaddedU8
 
@@ -1520,6 +1577,7 @@ class PrepTransferPlate(PrepCommand):
   """Transfer plate from source to destination (cmd=20, dest=Pipettor)."""
 
   command_id = 20
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   plate_source_top_center: Annotated[XYZCoord, Struct()]
   plate_destination_top_center: Annotated[XYZCoord, Struct()]
   plate: Annotated[PlateDimensions, Struct()]
@@ -1535,6 +1593,7 @@ class PrepReleasePlate(PrepCommand):
   """Release plate / open gripper (cmd=21, dest=Pipettor)."""
 
   command_id = 21
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
 
 
 # CORE gripper tool definition for PrepPickUpTool (struct); matches instrument id=11.
@@ -1554,6 +1613,7 @@ class PrepEmptyDispenser(PrepCommand):
   """Empty dispenser (cmd=23, dest=Pipettor)."""
 
   command_id = 23
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channels: EnumArray
 
 
@@ -1562,6 +1622,7 @@ class PrepMoveToPosition(PrepCommand):
   """Move to position (cmd=26, dest=Pipettor or ChannelCoordinator)."""
 
   command_id = 26
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   move_parameters: Annotated[GantryMoveXYZParameters, Struct()]
 
 
@@ -1570,11 +1631,12 @@ class PrepMoveToPositionViaLane(PrepCommand):
   """Move to position via lane (cmd=27, dest=Pipettor or ChannelCoordinator)."""
 
   command_id = 27
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   move_parameters: Annotated[GantryMoveXYZParameters, Struct()]
 
 
 @dataclass
-class PrepGetPositions(PrepCommand):
+class PrepGetPositions(PrepStatusRequest):
   """GetPositions (cmd=25, dest=Pipettor).
 
   Returns the current XYZ position of each channel as a StructArray of
@@ -1582,7 +1644,7 @@ class PrepGetPositions(PrepCommand):
   """
 
   command_id = 25
-  action_code = 0  # STATUS_REQUEST
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
 
   @dataclass(frozen=True)
   class Response:
@@ -1594,6 +1656,7 @@ class PrepMoveZUpToSafe(PrepCommand):
   """Move Z axes up to safe height (cmd=28, dest=Pipettor)."""
 
   command_id = 28
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channels: EnumArray
 
 
@@ -1602,6 +1665,7 @@ class PrepZSeekLldPosition(PrepCommand):
   """Z-seek LLD position (cmd=29, dest=Pipettor)."""
 
   command_id = 29
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   seek_parameters: Annotated[list[LLDChannelSeekParameters], StructArray()]
 
 
@@ -1610,6 +1674,7 @@ class PrepCreateTadmLimitCurve(PrepCommand):
   """Create TADM limit curve (cmd=31, dest=Pipettor)."""
 
   command_id = 31
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channel: U32
   name: Str
   lower_limit: Annotated[list[LimitCurveEntry], StructArray()]
@@ -1621,6 +1686,7 @@ class PrepEraseTadmLimitCurves(PrepCommand):
   """Erase TADM limit curves for a channel (cmd=32, dest=Pipettor)."""
 
   command_id = 32
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channel: U32
 
 
@@ -1629,6 +1695,7 @@ class PrepGetTadmLimitCurveNames(PrepCommand):
   """Get TADM limit curve names for a channel (cmd=33, dest=Pipettor)."""
 
   command_id = 33
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channel: U32
 
 
@@ -1637,6 +1704,7 @@ class PrepGetTadmLimitCurveInfo(PrepCommand):
   """Get TADM limit curve info (cmd=34, dest=Pipettor)."""
 
   command_id = 34
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channel: U32
   name: Str
 
@@ -1646,6 +1714,7 @@ class PrepRetrieveTadmData(PrepCommand):
   """Retrieve TADM data for a channel (cmd=35, dest=Pipettor)."""
 
   command_id = 35
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channel: U32
 
 
@@ -1654,6 +1723,7 @@ class PrepResetTadmFifo(PrepCommand):
   """Reset TADM FIFO (cmd=36, dest=Pipettor)."""
 
   command_id = 36
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   channels: EnumArray
 
 
@@ -1662,6 +1732,7 @@ class PrepAspirateNoLldMonitoringV2(PrepCommand):
   """Aspirate v2 without LLD or monitoring (cmd=38, dest=Pipettor)."""
 
   command_id = 38
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersNoLldAndMonitoring2], StructArray()]
 
 
@@ -1670,6 +1741,7 @@ class PrepAspirateTadmV2(PrepCommand):
   """Aspirate v2 with TADM, no LLD (cmd=39, dest=Pipettor)."""
 
   command_id = 39
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersNoLldAndTadm2], StructArray()]
 
 
@@ -1678,6 +1750,7 @@ class PrepAspirateWithLldV2(PrepCommand):
   """Aspirate v2 with LLD and monitoring (cmd=40, dest=Pipettor)."""
 
   command_id = 40
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersLldAndMonitoring2], StructArray()]
 
 
@@ -1686,6 +1759,7 @@ class PrepAspirateWithLldTadmV2(PrepCommand):
   """Aspirate v2 with LLD and TADM (cmd=41, dest=Pipettor)."""
 
   command_id = 41
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   aspirate_parameters: Annotated[list[AspirateParametersLldAndTadm2], StructArray()]
 
 
@@ -1694,6 +1768,7 @@ class PrepDispenseNoLldV2(PrepCommand):
   """Dispense v2 without LLD (cmd=42, dest=Pipettor)."""
 
   command_id = 42
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   dispense_parameters: Annotated[list[DispenseParametersNoLld2], StructArray()]
 
 
@@ -1702,6 +1777,7 @@ class PrepDispenseWithLldV2(PrepCommand):
   """Dispense v2 with LLD (cmd=43, dest=Pipettor)."""
 
   command_id = 43
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
   dispense_parameters: Annotated[list[DispenseParametersLld2], StructArray()]
 
 
@@ -1715,16 +1791,17 @@ class PrepInitialize(PrepCommand):
   """Initialize MLPrep (cmd=1, dest=MLPrep)."""
 
   command_id = 1
+  firmware_path = "MLPrepRoot.MLPrep"
   smart: PaddedBool
   tip_drop_params: Annotated[InitTipDropParameters, Struct()]
 
 
 @dataclass
-class PrepGetIsInitialized(PrepCommand):
+class PrepGetIsInitialized(PrepStatusRequest):
   """Query whether MLPrep is initialized. Firmware yaml: [1:2] GetIsInitialized(void) -> value: bool."""
 
   command_id = 2
-  action_code = 0  # STATUS_REQUEST
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -1736,6 +1813,7 @@ class PrepPark(PrepCommand):
   """Park MLPrep (cmd=3, dest=MLPrep)."""
 
   command_id = 3
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
@@ -1743,6 +1821,7 @@ class PrepSpread(PrepCommand):
   """Spread channels (cmd=4, dest=MLPrep)."""
 
   command_id = 4
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
@@ -1750,6 +1829,7 @@ class PrepAddTipAndNeedleDefinition(PrepCommand):
   """Add tip/needle definition (cmd=12, dest=MLPrep)."""
 
   command_id = 12
+  firmware_path = "MLPrepRoot.MLPrep"
   tip_definition: Annotated[TipDefinition, Struct()]
 
 
@@ -1758,6 +1838,7 @@ class PrepRemoveTipAndNeedleDefinition(PrepCommand):
   """Remove tip/needle definition by ID (cmd=13, dest=MLPrep)."""
 
   command_id = 13
+  firmware_path = "MLPrepRoot.MLPrep"
   id_: WEnum
 
 
@@ -1766,6 +1847,7 @@ class PrepReadStorage(PrepCommand):
   """Read from instrument storage (cmd=14, dest=MLPrep)."""
 
   command_id = 14
+  firmware_path = "MLPrepRoot.MLPrep"
   offset: U32
   length: U32
 
@@ -1775,6 +1857,7 @@ class PrepWriteStorage(PrepCommand):
   """Write to instrument storage (cmd=15, dest=MLPrep)."""
 
   command_id = 15
+  firmware_path = "MLPrepRoot.MLPrep"
   offset: U32
   data: U8Array
 
@@ -1784,6 +1867,7 @@ class PrepPowerDownRequest(PrepCommand):
   """Request power down (cmd=17, dest=MLPrep)."""
 
   command_id = 17
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
@@ -1791,6 +1875,7 @@ class PrepConfirmPowerDown(PrepCommand):
   """Confirm power down (cmd=18, dest=MLPrep)."""
 
   command_id = 18
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
@@ -1798,6 +1883,7 @@ class PrepCancelPowerDown(PrepCommand):
   """Cancel power down (cmd=19, dest=MLPrep)."""
 
   command_id = 19
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
@@ -1805,6 +1891,7 @@ class PrepRemoveChannelPower(PrepCommand):
   """Remove channel power for head swap (cmd=23, dest=MLPrep)."""
 
   command_id = 23
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
@@ -1812,6 +1899,7 @@ class PrepRestoreChannelPower(PrepCommand):
   """Restore channel power after head swap (cmd=24, dest=MLPrep)."""
 
   command_id = 24
+  firmware_path = "MLPrepRoot.MLPrep"
   delay_ms: U32
 
 
@@ -1820,6 +1908,7 @@ class PrepSetDeckLight(PrepCommand):
   """Set deck LED colour (cmd=25, dest=MLPrep)."""
 
   command_id = 25
+  firmware_path = "MLPrepRoot.MLPrep"
   white: PaddedU8
   red: PaddedU8
   green: PaddedU8
@@ -1827,11 +1916,11 @@ class PrepSetDeckLight(PrepCommand):
 
 
 @dataclass
-class PrepGetDeckLight(PrepCommand):
+class PrepGetDeckLight(PrepStatusRequest):
   """Get deck LED colour (cmd=26, dest=MLPrep)."""
 
   command_id = 26
-  action_code = 0  # STATUS_REQUEST
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -1846,6 +1935,7 @@ class PrepSuspendedPark(PrepCommand):
   """Suspended park / move to load position (cmd=29, dest=MLPrep)."""
 
   command_id = 29
+  firmware_path = "MLPrepRoot.MLPrep"
   move_parameters: Annotated[GantryMoveXYZParameters, Struct()]
 
 
@@ -1854,6 +1944,7 @@ class PrepMethodBegin(PrepCommand):
   """Begin method (cmd=30, dest=MLPrep)."""
 
   command_id = 30
+  firmware_path = "MLPrepRoot.MLPrep"
   automatic_pause: PaddedBool
 
 
@@ -1862,6 +1953,7 @@ class PrepMethodEnd(PrepCommand):
   """End method (cmd=31, dest=MLPrep)."""
 
   command_id = 31
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
@@ -1869,17 +1961,15 @@ class PrepMethodAbort(PrepCommand):
   """Abort method (cmd=33, dest=MLPrep)."""
 
   command_id = 33
+  firmware_path = "MLPrepRoot.MLPrep"
 
 
 @dataclass
-class PrepIsParked(PrepCommand):
+class PrepIsParked(PrepStatusRequest):
   """Query parked status (cmd=34, dest=MLPrep). Firmware yaml: IsParked(void) -> parked: bool."""
 
   command_id = 34
-  action_code = 0  # STATUS_REQUEST
-  action_code = 0  # STATUS_REQUEST
-  action_code = 0  # STATUS_REQUEST
-  action_code = 0  # STATUS_REQUEST
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -1887,13 +1977,11 @@ class PrepIsParked(PrepCommand):
 
 
 @dataclass
-class PrepIsSpread(PrepCommand):
-  """Query spread status (cmd=35, dest=MLPrep). Default **COMMAND_REQUEST**; see :class:`PrepIsParked`."""
+class PrepIsSpread(PrepStatusRequest):
+  """Query spread status (cmd=35, dest=MLPrep). Same HOI pattern as :class:`PrepIsParked`."""
 
   command_id = 35
-  action_code = 0  # STATUS_REQUEST
-  action_code = 0  # STATUS_REQUEST
-  action_code = 0  # STATUS_REQUEST
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -1975,21 +2063,16 @@ class _WasteSiteDefinitionWire:
 
 # -----------------------------------------------------------------------------
 # Config queries (MLPrep / DeckConfiguration) for _get_hardware_config
+# (inherit :class:`PrepStatusRequest`, defined above)
 # -----------------------------------------------------------------------------
 
 
 @dataclass
-class _PrepStatusQuery(PrepCommand):
-  """Base for MLPrep status queries: STATUS_REQUEST (0), no params."""
-
-  action_code = 0
-
-
-@dataclass
-class PrepGetIsEnclosurePresent(_PrepStatusQuery):
+class PrepGetIsEnclosurePresent(PrepStatusRequest):
   """GetIsEnclosurePresent (cmd=21, dest=MLPrep). Firmware yaml: -> value: bool."""
 
   command_id = 21
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -1997,10 +2080,11 @@ class PrepGetIsEnclosurePresent(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetSafeSpeedsEnabled(_PrepStatusQuery):
+class PrepGetSafeSpeedsEnabled(PrepStatusRequest):
   """GetSafeSpeedsEnabled (cmd=28, dest=MLPrep). Firmware yaml: -> value: bool."""
 
   command_id = 28
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -2008,10 +2092,11 @@ class PrepGetSafeSpeedsEnabled(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetDefaultTraverseHeight(_PrepStatusQuery):
+class PrepGetDefaultTraverseHeight(PrepStatusRequest):
   """GetDefaultTraverseHeight (cmd=10, dest=MLPrep). Returns F32."""
 
   command_id = 10
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -2019,7 +2104,7 @@ class PrepGetDefaultTraverseHeight(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetTipAndNeedleDefinitions(_PrepStatusQuery):
+class PrepGetTipAndNeedleDefinitions(PrepStatusRequest):
   """GetTipAndNeedleDefinitions (cmd=11, dest=MLPrep).
 
   Returns the list of tip/needle definitions registered on the instrument.
@@ -2028,6 +2113,7 @@ class PrepGetTipAndNeedleDefinitions(_PrepStatusQuery):
   """
 
   command_id = 11
+  firmware_path = "MLPrepRoot.MLPrep"
 
   @dataclass(frozen=True)
   class Response:
@@ -2035,10 +2121,11 @@ class PrepGetTipAndNeedleDefinitions(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetDeckBounds(_PrepStatusQuery):
+class PrepGetDeckBounds(PrepStatusRequest):
   """GetDeckBounds (cmd=1, dest=DeckConfiguration). Returns 6× F32 (min/max x,y,z)."""
 
   command_id = 1
+  firmware_path = "MLPrepRoot.MLPrepCalibration.DeckConfiguration"
 
   @dataclass(frozen=True)
   class Response:
@@ -2051,7 +2138,7 @@ class PrepGetDeckBounds(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetCalibrationSiteDefinitions(_PrepStatusQuery):
+class PrepGetCalibrationSiteDefinitions(PrepStatusRequest):
   """GetCalibrationSiteDefinitions (cmd=3, dest=DeckConfiguration).
 
   Response is a STRUCTURE_ARRAY of CalibrationSiteDefinition structs:
@@ -2059,6 +2146,7 @@ class PrepGetCalibrationSiteDefinitions(_PrepStatusQuery):
   """
 
   command_id = 3
+  firmware_path = "MLPrepRoot.MLPrepCalibration.DeckConfiguration"
 
   @dataclass(frozen=True)
   class Response:
@@ -2066,7 +2154,7 @@ class PrepGetCalibrationSiteDefinitions(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetDeckSiteDefinitions(_PrepStatusQuery):
+class PrepGetDeckSiteDefinitions(PrepStatusRequest):
   """GetDeckSiteDefinitions (cmd=7, dest=DeckConfiguration).
 
   Response is a STRUCTURE_ARRAY of DeckSiteDefinition structs:
@@ -2075,6 +2163,7 @@ class PrepGetDeckSiteDefinitions(_PrepStatusQuery):
   """
 
   command_id = 7
+  firmware_path = "MLPrepRoot.MLPrepCalibration.DeckConfiguration"
 
   @dataclass(frozen=True)
   class Response:
@@ -2082,7 +2171,7 @@ class PrepGetDeckSiteDefinitions(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetWasteSiteDefinitions(_PrepStatusQuery):
+class PrepGetWasteSiteDefinitions(PrepStatusRequest):
   """GetWasteSiteDefinitions (cmd=12, dest=DeckConfiguration).
 
   Response is a STRUCTURE_ARRAY of WasteSiteDefinition structs:
@@ -2091,6 +2180,7 @@ class PrepGetWasteSiteDefinitions(_PrepStatusQuery):
   """
 
   command_id = 12
+  firmware_path = "MLPrepRoot.MLPrepCalibration.DeckConfiguration"
 
   @dataclass(frozen=True)
   class Response:
@@ -2098,7 +2188,7 @@ class PrepGetWasteSiteDefinitions(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetChannelBounds(PrepCommand):
+class PrepGetChannelBounds(PrepStatusRequest):
   """GetChannelBounds (cmd=10, dest=PipettorService).
 
   Returns per-channel movement bounds (x_min, x_max, y_min, y_max, z_min, z_max)
@@ -2106,7 +2196,7 @@ class PrepGetChannelBounds(PrepCommand):
   """
 
   command_id = 10
-  action_code = 0  # STATUS_REQUEST
+  firmware_path = "MLPrepRoot.PipettorRoot.Pipettor.PipettorService"
 
   @dataclass(frozen=True)
   class Response:
@@ -2114,7 +2204,7 @@ class PrepGetChannelBounds(PrepCommand):
 
 
 @dataclass
-class PrepGetPresentChannels(_PrepStatusQuery):
+class PrepGetPresentChannels(PrepStatusRequest):
   """GetPresentChannels (cmd=17, dest=MLPrepService).
 
   Returns a list of enum values (iface=1, id=5): which channels are present.
@@ -2123,6 +2213,7 @@ class PrepGetPresentChannels(_PrepStatusQuery):
   """
 
   command_id = 17
+  firmware_path = "MLPrepRoot.MLPrepService"
 
   @dataclass(frozen=True)
   class Response:
@@ -2139,6 +2230,7 @@ class PrepBeginCalibration(PrepCommand):
   """BeginCalibration (cmd=1, dest=MLPrepCalibration). Enter calibration mode."""
 
   command_id = 1
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
 
 
 @dataclass
@@ -2146,6 +2238,7 @@ class PrepCancelCalibration(PrepCommand):
   """CancelCalibration (cmd=2, dest=MLPrepCalibration). Cancel active calibration session."""
 
   command_id = 2
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
 
 
 @dataclass
@@ -2153,6 +2246,7 @@ class PrepEndCalibration(PrepCommand):
   """EndCalibration (cmd=3, dest=MLPrepCalibration). End calibration and store results with timestamp."""
 
   command_id = 3
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   date_time: Annotated[HoiDateTime, Struct()]
 
 
@@ -2161,6 +2255,7 @@ class PrepResetCalibration(PrepCommand):
   """ResetCalibration (cmd=4, dest=MLPrepCalibration). Reset calibration data, optionally storing."""
 
   command_id = 4
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   store: PaddedBool
 
 
@@ -2169,6 +2264,7 @@ class PrepCalibrationInitialize(PrepCommand):
   """CalibrationInitialize (cmd=5, dest=MLPrepCalibration). Initialize calibration hardware."""
 
   command_id = 5
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
 
 
 @dataclass
@@ -2221,6 +2317,7 @@ class PrepSelfCalibrate(PrepCommand):
   """
 
   command_id = 6
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   site_index: U32
   channels: WEnum  # ChannelIndex
   axis: PaddedBool
@@ -2234,6 +2331,7 @@ class PrepCalibrateXAxis(PrepCommand):
   """CalibrateXAxis (cmd=7, dest=MLPrepCalibration). Returns offset: F32."""
 
   command_id = 7
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   site_index: U32
   channel: WEnum  # ChannelIndex
 
@@ -2247,6 +2345,7 @@ class PrepCalibrateYAxis(PrepCommand):
   """CalibrateYAxis (cmd=8, dest=MLPrepCalibration). Returns offset: F32."""
 
   command_id = 8
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   site_index: U32
   channel: WEnum  # ChannelIndex
 
@@ -2260,6 +2359,7 @@ class PrepCalibrateZAxis(PrepCommand):
   """CalibrateZAxis (cmd=9, dest=MLPrepCalibration). Returns offset: F32."""
 
   command_id = 9
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   site_index: U32
   channel: WEnum  # ChannelIndex
 
@@ -2273,6 +2373,7 @@ class PrepCalibrateSqueeze(PrepCommand):
   """CalibrateSqueeze (cmd=14, dest=MLPrepCalibration). Returns position: U32."""
 
   command_id = 14
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   channel: WEnum  # ChannelIndex
 
   @dataclass(frozen=True)
@@ -2289,6 +2390,7 @@ class PrepCalibrateSqueezeTips(PrepCommand):
   """
 
   command_id = 15
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
   channels: Annotated[list[TipPositionParameters], StructArray()]
 
   @dataclass(frozen=True)
@@ -2297,7 +2399,7 @@ class PrepCalibrateSqueezeTips(PrepCommand):
 
 
 @dataclass
-class PrepGetCalibrationValues(_PrepStatusQuery):
+class PrepGetCalibrationValues(PrepStatusRequest):
   """GetCalibrationValues (cmd=16, dest=MLPrepCalibration).
 
   Returns independentOffsetX (F32), mphOffsetX (F32), and per-channel
@@ -2305,6 +2407,7 @@ class PrepGetCalibrationValues(_PrepStatusQuery):
   """
 
   command_id = 16
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
 
   @dataclass(frozen=True)
   class Response:
@@ -2314,13 +2417,14 @@ class PrepGetCalibrationValues(_PrepStatusQuery):
 
 
 @dataclass
-class PrepGetChannelHardwareConfiguration(_PrepStatusQuery):
+class PrepGetChannelHardwareConfiguration(PrepStatusRequest):
   """GetChannelHardwareConfiguration (cmd=24, dest=MLPrepCalibration).
 
   Response is a StructArray of ChannelHardwareConfig: Channel (enum) + Hardware (enum).
   """
 
   command_id = 24
+  firmware_path = "MLPrepRoot.MLPrepCalibration"
 
   @dataclass(frozen=True)
   class Response:

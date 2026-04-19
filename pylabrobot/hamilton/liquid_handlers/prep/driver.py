@@ -1,76 +1,46 @@
-"""PrepDriver: Hamilton TCP driver for Hamilton Prep liquid handlers (Nimbus-style layout)."""
+"""PrepDriver: Hamilton TCP driver for Hamilton Prep liquid handlers (Nimbus-style layout).
+
+Transport-only: opens TCP, discovers the firmware root, and resolves one bootstrap
+handle — :attr:`PrepDriver.mlprep_address` (``MLPrepRoot.MLPrep``). Everything
+else uses :meth:`HamiltonTCPClient.resolve_path`, which consults the introspection
+registry (cache-hot after the first hit).
+
+**JIT command targets.** Concrete :class:`~pylabrobot.hamilton.liquid_handlers.prep.prep_commands.PrepCommand`
+subclasses declare ``firmware_path``; :meth:`PrepDriver.send_command` resolves
+that path when ``dest`` is the unresolved sentinel. No parallel path tables on
+backends.
+
+**Bootstrap info.** :class:`~pylabrobot.hamilton.liquid_handlers.prep.info.PrepInstrumentInfo`
+resolves a small set of diagnostic paths (see ``PrepInstrumentInfo._paths``)
+during setup via the same ``resolve_path`` cache.
+
+**Channel topology** (per-channel drive addresses) is discovered in
+:mod:`~pylabrobot.hamilton.liquid_handlers.prep.channels` by walking the tree
+from ``MLPrepRoot``, not via a separate registry.
+"""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.hamilton.tcp.client import HamiltonTCPClient
+from pylabrobot.hamilton.tcp.commands import TCPCommand
 from pylabrobot.hamilton.tcp.error_tables import PREP_ERROR_CODES
-from pylabrobot.hamilton.tcp.interface_bundle import InterfacePathSpec, resolve_interface_path_specs
 from pylabrobot.hamilton.tcp.packets import Address
 
 from . import prep_commands as PrepCmd
+from .prep_commands import _UNRESOLVED, PrepCommand
 
 logger = logging.getLogger(__name__)
 
 _EXPECTED_ROOT = "MLPrepRoot"
 
-# Backwards-compatible alias (same as :class:`InterfacePathSpec`).
-PrepInterfaceSpec = InterfacePathSpec
-
-
-# Same logical interfaces as the prep_tcp reference backend (path strings).
-_PREP_INTERFACES: Dict[str, InterfacePathSpec] = {
-  "mlprep": InterfacePathSpec("MLPrepRoot.MLPrep", True, True),
-  "pipettor": InterfacePathSpec("MLPrepRoot.PipettorRoot.Pipettor", True, True),
-  "coordinator": InterfacePathSpec("MLPrepRoot.ChannelCoordinator", True, True),
-  "calibration": InterfacePathSpec("MLPrepRoot.MLPrepCalibration", False, True),
-  "deck_config": InterfacePathSpec("MLPrepRoot.MLPrepCalibration.DeckConfiguration", True, True),
-  "mph": InterfacePathSpec("MLPrepRoot.MphRoot.MPH", False, True),
-  "mlprep_service": InterfacePathSpec("MLPrepRoot.MLPrepService", False, True),
-}
-
-# Object-tree paths resolved on first use (not during :meth:`setup`). Contrast with
-# :data:`_PREP_INTERFACES`, which is bulk-resolved in :meth:`_resolve_prep_interfaces`.
-# See :meth:`PrepDriver._lazy_diag_address`.
-PREP_LAZY_RESOLVE_PATHS: Dict[str, str] = {
-  "mlprep_cpu": "MLPrepRoot.MLPrepCpu",
-  "module_information": "MLPrepRoot.PipettorRoot.ModuleInformation",
-}
-
-
-@dataclass(frozen=True)
-class PrepResolvedInterfaces:
-  """Concrete Prep firmware handles after :meth:`PrepDriver.setup`."""
-
-  mlprep: Address
-  pipettor: Address
-  coordinator: Address
-  calibration: Optional[Address]
-  deck_config: Address
-  mph: Optional[Address]
-  mlprep_service: Optional[Address]
-
-  @staticmethod
-  def from_resolution_map(m: Mapping[str, Optional[Address]]) -> PrepResolvedInterfaces:
-    def req(key: str) -> Address:
-      a = m.get(key)
-      if a is None:
-        raise RuntimeError(f"internal: missing required Prep interface '{key}'")
-      return a
-
-    return PrepResolvedInterfaces(
-      mlprep=req("mlprep"),
-      pipettor=req("pipettor"),
-      coordinator=req("coordinator"),
-      calibration=m.get("calibration"),
-      deck_config=req("deck_config"),
-      mph=m.get("mph"),
-      mlprep_service=m.get("mlprep_service"),
-    )
+# Canonical firmware path strings (single source for driver, chatterbox, probes).
+MLPREP_OBJECT_PATH = "MLPrepRoot.MLPrep"
+PIPETTOR_OBJECT_PATH = "MLPrepRoot.PipettorRoot.Pipettor"
 
 
 @dataclass
@@ -84,14 +54,14 @@ class PrepSetupParams(BackendParams):
 
 
 class PrepDriver(HamiltonTCPClient):
-  """Hamilton TCP client for Prep: connection, interface resolution, lazy diagnostic paths, firmware string decode.
+  """Hamilton TCP client for Prep: connection, MLPrep bootstrap, firmware string decode.
 
-  MLPrep motion, method lifecycle, power, and deck-light commands are implemented on ``Prep`` and
-  ``PrepMethodLifecycle``, not on this driver.
-
-  Transport only — no pip backend reference. The :class:`~pylabrobot.hamilton.liquid_handlers.prep.prep.Prep`
-  device constructs :class:`~pylabrobot.hamilton.liquid_handlers.prep.pip_backend.PrepPIPBackend` after
-  :meth:`setup` completes transport and interface resolution.
+  Instrument-wide motion, power, and deck-light entry points live on
+  :class:`~pylabrobot.hamilton.liquid_handlers.prep.prep.Prep` and
+  :class:`~pylabrobot.hamilton.liquid_handlers.prep.method.PrepMethodLifecycle`.
+  Pipettor, calibration, and MPH traffic goes through :class:`PrepCommand` plus
+  :meth:`send_command` / :meth:`resolve_path`, or through peers that build those
+  commands.
   """
 
   def __init__(
@@ -116,9 +86,7 @@ class PrepDriver(HamiltonTCPClient):
       connection_timeout=connection_timeout,
       error_codes=merged,
     )
-    self._resolved_interfaces: Dict[str, Optional[Address]] = {}
-    self._prep_resolved: Optional[PrepResolvedInterfaces] = None
-    self._lazy_diag_cache: Dict[str, Optional[Address]] = {}
+    self._mlprep_address: Optional[Address] = None
 
   # ---------------------------------------------------------------------------
   # Lifecycle
@@ -134,6 +102,7 @@ class PrepDriver(HamiltonTCPClient):
         "PrepDriver.setup expected PrepSetupParams | None for backend_params, "
         f"got {type(backend_params).__name__}"
       )
+    del params  # consumed by Prep / peers, not the transport
 
     await super().setup()
 
@@ -143,50 +112,62 @@ class PrepDriver(HamiltonTCPClient):
         f"Expected root '{_EXPECTED_ROOT}' (Prep), but discovered '{root}'. Wrong instrument?"
       )
 
-    await self._resolve_prep_interfaces()
+    self._mlprep_address = await self.resolve_path(MLPREP_OBJECT_PATH)
 
   async def stop(self) -> None:
     await super().stop()
-    self._resolved_interfaces.clear()
-    self._prep_resolved = None
-    self._lazy_diag_cache.clear()
+    self._mlprep_address = None
 
   # ---------------------------------------------------------------------------
-  # Interface resolution
+  # MLPrep root handle (resolved in :meth:`setup`)
   # ---------------------------------------------------------------------------
-
-  def has_interface(self, name: str) -> bool:
-    return name in self._resolved_interfaces and self._resolved_interfaces[name] is not None
-
-  async def require_interface(self, name: str) -> Address:
-    if name not in _PREP_INTERFACES:
-      raise KeyError(f"Unknown interface: {name}")
-    spec = _PREP_INTERFACES[name]
-    addr = self._resolved_interfaces.get(name)
-    if addr is None:
-      msg = f"Could not find interface '{name}' ({spec.path}) on Prep."
-      if spec.raise_when_missing:
-        logger.warning("%s", msg)
-      raise RuntimeError(msg)
-    return addr
 
   @property
-  def prep_interfaces(self) -> PrepResolvedInterfaces:
-    if self._prep_resolved is None:
-      raise RuntimeError("Prep interfaces not resolved. Call setup() first.")
-    return self._prep_resolved
-
-  async def _resolve_prep_interfaces(self) -> None:
-    """Resolve all configured dot-paths; required interfaces fail fast."""
-    self._resolved_interfaces.clear()
-    self._prep_resolved = None
-    self._resolved_interfaces.update(
-      await resolve_interface_path_specs(self, _PREP_INTERFACES, instrument_label="Prep")
-    )
-    self._prep_resolved = PrepResolvedInterfaces.from_resolution_map(self._resolved_interfaces)
+  def mlprep_address(self) -> Address:
+    """Address of ``MLPrepRoot.MLPrep``. Raises if :meth:`setup` has not run."""
+    if self._mlprep_address is None:
+      raise RuntimeError("MLPrep address not resolved. Call setup() first.")
+    return self._mlprep_address
 
   # ---------------------------------------------------------------------------
-  # Discovery and firmware tree
+  # JIT firmware-path resolution for PrepCommand.dest
+  # ---------------------------------------------------------------------------
+
+  async def send_command(
+    self,
+    command: TCPCommand,
+    ensure_connection: bool = True,
+    return_raw: bool = False,
+    raise_on_error: bool = True,
+    read_timeout: Optional[float] = None,
+  ) -> Any:
+    if isinstance(command, PrepCommand) and command.dest == _UNRESOLVED:
+      path = type(command).firmware_path
+      if path is None:
+        raise RuntimeError(
+          f"{type(command).__name__} has no firmware_path declared and no "
+          "explicit dest= supplied at construction. Polymorphic-dest commands "
+          "must pass dest= to send_command."
+        )
+      try:
+        addr = await self.resolve_path(path)
+      except KeyError as exc:
+        raise RuntimeError(
+          f"Cannot send {type(command).__name__}: firmware path "
+          f"{path!r} did not resolve on this instrument ({exc})."
+        ) from exc
+      command.dest = addr
+      command.dest_address = addr
+    return await super().send_command(
+      command,
+      ensure_connection=ensure_connection,
+      return_raw=return_raw,
+      raise_on_error=raise_on_error,
+      read_timeout=read_timeout,
+    )
+
+  # ---------------------------------------------------------------------------
+  # Discovery
   # ---------------------------------------------------------------------------
 
   async def discovered_root_name(self) -> str:
@@ -195,27 +176,6 @@ class PrepDriver(HamiltonTCPClient):
       raise RuntimeError("No root objects discovered. Call setup() first.")
     info = await self.introspection.get_object(roots[0])
     return info.name
-
-  # ---------------------------------------------------------------------------
-  # Lazy diagnostic paths (JIT :meth:`resolve_path`, same family as interface resolution)
-  # ---------------------------------------------------------------------------
-
-  async def _lazy_diag_address(self, key: str) -> Optional[Address]:
-    """Resolve and cache a :data:`PREP_LAZY_RESOLVE_PATHS` target.
-
-    Missing or unresolvable paths are cached as ``None`` so repeated calls stay cheap.
-    """
-    if key not in PREP_LAZY_RESOLVE_PATHS:
-      raise KeyError(f"unknown diagnostic object key: {key!r}")
-    if key in self._lazy_diag_cache:
-      return self._lazy_diag_cache[key]
-    path = PREP_LAZY_RESOLVE_PATHS[key]
-    try:
-      addr = await self.resolve_path(path)
-    except (KeyError, RuntimeError, TypeError):
-      addr = None
-    self._lazy_diag_cache[key] = addr
-    return addr
 
   # ---------------------------------------------------------------------------
   # Firmware string queries (transport: raw HOI decode + status query)
@@ -242,8 +202,11 @@ class PrepDriver(HamiltonTCPClient):
     """Send a status query and decode the string response."""
     Cmd = type(
       "_FWQuery",
-      (PrepCmd._PrepStatusQuery,),
-      {"command_id": cmd_id, "interface_id": iface_id, "__annotations__": {"dest": Address}},
+      (PrepCmd.PrepStatusRequest,),
+      cast(
+        dict[str, Any],
+        {"command_id": cmd_id, "interface_id": iface_id, "__annotations__": {"dest": Address}},
+      ),
     )
     raw: Optional[tuple] = await self.send_command(
       Cmd(dest=addr), return_raw=True, raise_on_error=False
