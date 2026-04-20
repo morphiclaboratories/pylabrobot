@@ -251,9 +251,22 @@ def _build_introspection_maps() -> tuple[dict[int, str], set[int], set[int], set
 _INTROSPECTION_TYPE_NAMES[113] = "List[f32] [In] (empirical)"
 _ARGUMENT_TYPE_IDS.add(113)
 
+# Sentinels in GetStructs structureElementTypes blob (Parameter.ParameterTypes enum values).
 _COMPLEX_STRUCT_TYPE_IDS = {30, 31, 32, 35}  # STRUCTURE=30, STRUCT_ARRAY=31, ENUM=32, ENUM_ARRAY=35
-_STRUCT_REF_TYPE_IDS = frozenset({30, 31, 57, 60, 61, 63, 64})
-_ENUM_REF_TYPE_IDS = frozenset({32, 35, 78, 81, 82, 85})
+
+# All type_ids that carry a (source_id, ref_id) pair pointing to a struct definition,
+# across both GetMethod and GetStructs contexts. All four HOI directions (In/Out/InOut/RetVal)
+# are included so that is_struct_ref / is_enum_ref work for Out and InOut parameters.
+_STRUCT_REF_TYPE_IDS = frozenset(
+  {30, 31}  # GetStructs context (STRUCTURE, STRUCT_ARRAY)
+  | {57, 58, 59, 60}  # GetMethod struct [In, InOut, Out, RetVal]
+  | {61, 62, 63, 64}  # GetMethod struct[] [In, InOut, Out, RetVal]
+)
+_ENUM_REF_TYPE_IDS = frozenset(
+  {32, 35}  # GetStructs context (ENUM, ENUM_ARRAY)
+  | {78, 79, 80, 81}  # GetMethod enum [In, InOut, Out, RetVal]
+  | {82, 83, 84, 85}  # GetMethod enum[] [In, InOut, Out, RetVal]
+)
 _ALL_COMPLEX_TYPE_IDS = frozenset(_COMPLEX_METHOD_TYPE_IDS | _COMPLEX_STRUCT_TYPE_IDS)
 
 
@@ -449,36 +462,35 @@ def flatten_firmware_tree(tree: FirmwareTree) -> List[Tuple[str, Address, Object
 
 @dataclass
 class ParameterType:
-  """A resolved type reference used for both method parameters and struct fields.
+  """A resolved type reference from either GetMethod parameterTypes or GetStructs field types.
 
   Simple types (i8, f32, etc.) have only type_id set.
-  Complex references additionally carry source_id (the interface defining the
-  struct/enum) and ref_id (struct_id or enum_id within that interface).
-  These are encoded as 3-byte triples [type_id, source_id, ref_id] in two
-  distinct contexts that each use a different sentinel byte:
+  Complex references additionally carry source_id and ref_id:
+    source_id 1=global, 2=local, 3=network, 4=node-global.
+    ref_id is the struct/enum index within the pool identified by source_id.
 
-  - GetMethod parameterTypes: sentinels in _COMPLEX_METHOD_TYPE_IDS (57, 61 …)
-  - GetStructs structureElementTypes: sentinel 0xE8 (_COMPLEX_STRUCT_TYPE_IDS)
+  Wire widths vary by context and source_id (see _parse_method_param_types and
+  _parse_struct_field_types for the exact encoding from HoiObject.cs).
   """
 
   type_id: int
   source_id: Optional[int] = None
   ref_id: Optional[int] = None
-  _byte_width: int = 1  # Bytes consumed in struct element_types (1=simple, 3=ref, 7+=inline)
+  _byte_width: int = 1  # bytes consumed from the wire blob (1=simple, 3=ref, 7=node-global struct field, variable=node-global method param)
 
   @property
   def is_complex(self) -> bool:
-    """True if this is a 3-byte complex reference (method param or struct field)."""
+    """True if this entry has a source_id/ref_id pair (struct or enum reference)."""
     return self.type_id in _ALL_COMPLEX_TYPE_IDS
 
   @property
   def is_struct_ref(self) -> bool:
-    """True if this is a struct reference (type 30 in struct context, 57/61 in method context)."""
+    """True if this references a struct definition (all directions: In/Out/InOut/RetVal)."""
     return self.type_id in _STRUCT_REF_TYPE_IDS
 
   @property
   def is_enum_ref(self) -> bool:
-    """True if this is an enum reference (type 32 in struct context, 78/81/82/85 in method)."""
+    """True if this references an enum definition (all directions: In/Out/InOut/RetVal)."""
     return self.type_id in _ENUM_REF_TYPE_IDS
 
   def resolve_name(
@@ -506,61 +518,83 @@ class ParameterType:
     return f"{base}(iface={self.source_id}, id={self.ref_id})"
 
 
-def _parse_type_seq(
+def _parse_method_param_types(
   data: bytes | list[int],
-  complex_ids: set[int],
 ) -> List[ParameterType]:
-  """Shared variable-width parser for Hamilton type-ID byte sequences.
+  """Parse GetMethod parameterTypes byte stream.
 
-  Both GetMethod parameterTypes and GetStructs structureElementTypes encode types
-  as a byte stream where simple types occupy 1 byte and complex references have
-  variable width.
+  Source: HoiObject.HandleStruct in HoiObject.cs.
 
-  For struct element types (complex_ids = _COMPLEX_STRUCT_TYPE_IDS), complex
-  sentinels (30=STRUCTURE, 31=STRUCT_ARRAY, 32=ENUM, 35=ENUM_ARRAY) have two
-  encoding formats determined by the second byte:
-
-  - **Reference** (second byte ≤ 3): 3 bytes ``[sentinel, source_id, ref_id]``
-    where source 1=global, 2=local, 3=network.
-  - **Inline definition** (second byte = 4): variable width, terminated by
-    ``0xEE`` (238). Typically 7 bytes: ``[sentinel, 4, base_type, 0, 1, 0, 0xEE]``.
-    The ``base_type`` specifies the underlying wire type (1=I8, 2=I16, 3=I32).
-
-  For method parameter types, only the 3-byte reference format is used.
-
-  Args:
-    data: Raw bytes or list of ints to parse.
-    complex_ids: Set of type_id values that introduce a multi-byte entry.
-
-  Returns:
-    List of ParameterType, one per logical type entry.
+  Encoding per entry:
+  - Simple type (not in _COMPLEX_METHOD_TYPE_IDS): ``[type_id]`` — 1 byte.
+  - source_id 1/2/3 (global/local/network): ``[type_id, source_id, ref_id]`` — 3 bytes.
+  - source_id 4 (node-global): ``[type_id, 4, index, '"', FormatAddress_bytes..., '"', ' ']``.
+    FormatAddress encodes Module+Node as hex byte pairs, wrapped in ASCII double-quotes.
+    The index byte is the struct/enum index within the node-global pool.
   """
-  _INLINE_MARKER = 4
-  _INLINE_TERMINATOR = 0xEE  # 238
+  _NODE_GLOBAL = 4
+  _QUOTE = 0x22
+  _SPACE = 0x20
 
   ints = list(data) if isinstance(data, bytes) else data
   result: List[ParameterType] = []
   i = 0
   while i < len(ints):
     tid = ints[i]
-    if tid in complex_ids and i + 2 < len(ints):
-      second = ints[i + 1]
-      if second == _INLINE_MARKER:
-        # Inline type definition: scan forward to 0xEE terminator
-        end = i + 2
-        while end < len(ints) and ints[end] != _INLINE_TERMINATOR:
+    if tid in _COMPLEX_METHOD_TYPE_IDS and i + 2 < len(ints):
+      source_id = ints[i + 1]
+      ref_id = ints[i + 2]
+      if source_id == _NODE_GLOBAL:
+        # [type_id, 4, index, '"', FormatAddress_bytes..., '"', ' ']
+        end = i + 4  # byte after opening '"'
+        while end < len(ints) and ints[end] != _QUOTE:
           end += 1
-        end += 1  # consume the 0xEE byte itself
-        # Store as ParameterType with the base wire type from byte [i+2]
-        width = end - i
-        base_type = ints[i + 2] if i + 2 < len(ints) else 0
-        result.append(
-          ParameterType(tid, source_id=_INLINE_MARKER, ref_id=base_type, _byte_width=width)
-        )
+        end += 1  # consume closing '"'
+        if end < len(ints) and ints[end] == _SPACE:
+          end += 1  # consume trailing ' '
+        result.append(ParameterType(tid, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=end - i))
         i = end
       else:
-        # Standard 3-byte reference: [sentinel, source_id, ref_id]
-        result.append(ParameterType(tid, source_id=second, ref_id=ints[i + 2], _byte_width=3))
+        result.append(ParameterType(tid, source_id=source_id, ref_id=ref_id, _byte_width=3))
+        i += 3
+    else:
+      result.append(ParameterType(tid))
+      i += 1
+  return result
+
+
+def _parse_struct_field_types(
+  data: bytes | list[int],
+) -> List[ParameterType]:
+  """Parse GetStructs structureElementTypes byte stream.
+
+  Source: HoiObject.GetStructs in HoiObject.cs.
+
+  Encoding per entry:
+  - Simple type (not in _COMPLEX_STRUCT_TYPE_IDS): ``[type_id]`` — 1 byte.
+  - source_id 1/2/3 (global/local/network): ``[type_id, source_id, ref_id]`` — 3 bytes.
+  - source_id 4 (node-global, scope.mAddress.ModuleID != 0):
+    ``[type_id, 4, index, ModHi, ModLo, NodeHi, NodeLo]`` — 7 bytes.
+    The 4 raw address bytes are written when the node-global object has a non-zero
+    ModuleID, which is always true for real node-global objects on this instrument.
+  """
+  _NODE_GLOBAL = 4
+  _NODE_GLOBAL_WIDTH = 7
+
+  ints = list(data) if isinstance(data, bytes) else data
+  result: List[ParameterType] = []
+  i = 0
+  while i < len(ints):
+    tid = ints[i]
+    if tid in _COMPLEX_STRUCT_TYPE_IDS and i + 2 < len(ints):
+      source_id = ints[i + 1]
+      ref_id = ints[i + 2]
+      if source_id == _NODE_GLOBAL:
+        # [type_id, 4, index, ModHi, ModLo, NodeHi, NodeLo] = 7 bytes
+        result.append(ParameterType(tid, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=_NODE_GLOBAL_WIDTH))
+        i += _NODE_GLOBAL_WIDTH
+      else:
+        result.append(ParameterType(tid, source_id=source_id, ref_id=ref_id, _byte_width=3))
         i += 3
     else:
       result.append(ParameterType(tid))
@@ -569,7 +603,7 @@ def _parse_type_seq(
 
 
 def _parse_type_ids(raw: str | bytes | None) -> List[ParameterType]:
-  """Parse GetMethod parameterTypes blob. Thin wrapper around _parse_type_seq.
+  """Parse GetMethod parameterTypes blob. Thin wrapper around _parse_method_param_types.
 
   Accepts bytes (preferred) or str — the device sends STRING (15) but the
   payload is binary, so callers must use parse_next_raw() to avoid UTF-8 errors.
@@ -577,7 +611,7 @@ def _parse_type_ids(raw: str | bytes | None) -> List[ParameterType]:
   if raw is None:
     return []
   data: list[int] = list(raw) if isinstance(raw, bytes) else [ord(c) for c in raw]
-  return _parse_type_seq(data, _COMPLEX_METHOD_TYPE_IDS)
+  return _parse_method_param_types(data)
 
 
 @dataclass
@@ -1082,7 +1116,8 @@ class GetMethodCommand(TCPCommand):
     _, name = parser.parse_next()
 
     # The remaining fragments are STRING types containing type IDs as bytes.
-    # Complex types (struct/enum refs) are 3-byte triples [type_id, source_id, ref_id].
+    # Complex types (struct/enum refs): 3 bytes [type_id, source_id, ref_id] for source_id 1–3;
+    # node-global (source_id=4): variable-length quote-delimited form — see _parse_method_param_types.
     # Labels are comma-separated, one per *logical* parameter (matching ParameterType count).
     parameter_labels_str = None
 
@@ -1817,21 +1852,21 @@ class HamiltonIntrospection:
     # field_counts = numberStructureElements from the device: logical fields per struct.
     # Struct IDs are positional (0-indexed); the device does not send them.
     field_counts = [int(c) for c in response.field_counts]
-    type_bytes = list(response.field_type_ids)  # flat byte array; some entries are 3-byte triples
+    type_bytes = list(response.field_type_ids)  # flat byte array; entries are 1, 3, or 7 bytes wide
     field_names = list(response.field_names)
     n_structs = len(field_counts)
     if n_structs == 0:
       return []
 
-    # Walk type_bytes with a byte-level cursor (variable width: 1 byte for simple
-    # types, 3 bytes for 0xE8 complex references). field_counts gives the number
-    # of *logical* fields per struct, not the number of bytes to consume.
+    # Walk type_bytes with a byte-level cursor. Width varies: 1=simple, 3=ref (source_id 1–3),
+    # 7=node-global (source_id=4). field_counts gives logical field count per struct,
+    # not bytes — _parse_struct_field_types tracks exact byte consumption via _byte_width.
     byte_offset = 0  # cursor into type_bytes
     name_offset = 0  # cursor into field_names
     result: List[StructInfo] = []
     for i, cnt in enumerate(field_counts):
       name = struct_names[i] if i < len(struct_names) else f"Struct_{i}"
-      parsed = _parse_type_seq(type_bytes[byte_offset:], _COMPLEX_STRUCT_TYPE_IDS)
+      parsed = _parse_struct_field_types(type_bytes[byte_offset:])
       # Consume exactly `cnt` logical entries; advance byte_offset by the bytes used.
       type_entries = parsed[:cnt]
       bytes_used = sum(pt._byte_width for pt in type_entries)
