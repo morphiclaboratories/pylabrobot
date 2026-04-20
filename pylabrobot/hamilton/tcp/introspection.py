@@ -213,19 +213,22 @@ _COMPLEX_METHOD_ROW_NAMES = frozenset(
 _HOI_PARAM_DIRECTION: tuple[str, ...] = ("In", "Out", "InOut", "RetVal")
 
 
-def _build_introspection_maps() -> tuple[dict[int, str], set[int], set[int], set[int], set[int]]:
+def _build_introspection_maps() -> (
+  tuple[dict[int, str], set[int], set[int], set[int], set[int], frozenset[int], frozenset[int], frozenset[int]]
+):
   names: dict[int, str] = {0: "void"}
   arg_ids: set[int] = set()
   ret_el_ids: set[int] = set()
   ret_val_ids: set[int] = set()
   complex_method_ids: set[int] = set()
+  struct_ref_ids: set[int] = set()
+  enum_ref_ids: set[int] = set()
   for row in _HOI_TYPE_ROWS:
     for ci, tid in enumerate(row.ids):
       if tid == 0:
         continue
       d = _HOI_PARAM_DIRECTION[ci]
-      disp = row.display_name
-      names[tid] = f"{disp} [{d}]"
+      names[tid] = f"{row.display_name} [{d}]"
       if ci in (0, 2):
         arg_ids.add(tid)
       elif ci == 1:
@@ -234,8 +237,23 @@ def _build_introspection_maps() -> tuple[dict[int, str], set[int], set[int], set
         ret_val_ids.add(tid)
       if row.dotnet_name in _COMPLEX_METHOD_ROW_NAMES:
         complex_method_ids.add(tid)
+      if row.dotnet_name in ("struct", "struct[]"):
+        struct_ref_ids.add(tid)
+      if row.dotnet_name in ("enum", "enum[]"):
+        enum_ref_ids.add(tid)
 
-  return names, arg_ids, ret_el_ids, ret_val_ids, complex_method_ids
+  # GetStructs sentinels (Parameter.ParameterTypes values): STRUCTURE=30, STRUCT_ARRAY=31,
+  # ENUM=32, ENUM_ARRAY=35. Not in _HOI_TYPE_ROWS — they live in the GetStructs wire format only.
+  _COMPLEX_STRUCT = frozenset({30, 31, 32, 35})
+  struct_ref_ids |= {30, 31}
+  enum_ref_ids |= {32, 35}
+
+  all_complex = frozenset(complex_method_ids | _COMPLEX_STRUCT)
+  return (
+    names, arg_ids, ret_el_ids, ret_val_ids,
+    frozenset(complex_method_ids), _COMPLEX_STRUCT,
+    frozenset(struct_ref_ids), frozenset(enum_ref_ids), all_complex,
+  )
 
 
 (
@@ -244,30 +262,16 @@ def _build_introspection_maps() -> tuple[dict[int, str], set[int], set[int], set
   _RETURN_ELEMENT_TYPE_IDS,
   _RETURN_VALUE_TYPE_IDS,
   _COMPLEX_METHOD_TYPE_IDS,
+  _COMPLEX_STRUCT_TYPE_IDS,
+  _STRUCT_REF_TYPE_IDS,
+  _ENUM_REF_TYPE_IDS,
+  _ALL_COMPLEX_TYPE_IDS,
 ) = _build_introspection_maps()
 
 # Empirical device behavior: type_id=113 appears as Argument on some firmware,
 # despite the static grid column implying RetVal.
-_INTROSPECTION_TYPE_NAMES[113] = "List[f32] [In] (empirical)"
+_INTROSPECTION_TYPE_NAMES[113] = "List[f32] [In] (empirical)" # TODO: Re-validate or remove
 _ARGUMENT_TYPE_IDS.add(113)
-
-# Sentinels in GetStructs structureElementTypes blob (Parameter.ParameterTypes enum values).
-_COMPLEX_STRUCT_TYPE_IDS = {30, 31, 32, 35}  # STRUCTURE=30, STRUCT_ARRAY=31, ENUM=32, ENUM_ARRAY=35
-
-# All type_ids that carry a (source_id, ref_id) pair pointing to a struct definition,
-# across both GetMethod and GetStructs contexts. All four HOI directions (In/Out/InOut/RetVal)
-# are included so that is_struct_ref / is_enum_ref work for Out and InOut parameters.
-_STRUCT_REF_TYPE_IDS = frozenset(
-  {30, 31}  # GetStructs context (STRUCTURE, STRUCT_ARRAY)
-  | {57, 58, 59, 60}  # GetMethod struct [In, InOut, Out, RetVal]
-  | {61, 62, 63, 64}  # GetMethod struct[] [In, InOut, Out, RetVal]
-)
-_ENUM_REF_TYPE_IDS = frozenset(
-  {32, 35}  # GetStructs context (ENUM, ENUM_ARRAY)
-  | {78, 79, 80, 81}  # GetMethod enum [In, InOut, Out, RetVal]
-  | {82, 83, 84, 85}  # GetMethod enum[] [In, InOut, Out, RetVal]
-)
-_ALL_COMPLEX_TYPE_IDS = frozenset(_COMPLEX_METHOD_TYPE_IDS | _COMPLEX_STRUCT_TYPE_IDS)
 
 
 def get_introspection_type_category(type_id: int) -> str:

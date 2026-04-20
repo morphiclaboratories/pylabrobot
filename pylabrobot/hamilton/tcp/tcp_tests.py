@@ -726,13 +726,10 @@ class TestCountedFlatArrayDecode(unittest.TestCase):
 class TestIntrospectionTypeGridInvariants(unittest.TestCase):
   """Canonical integrity guard for HOI type table edits."""
 
-  def test_grid_dimensions_match_protocol(self):
+  def test_grid_shape_and_padding_row_contract(self):
     rows = introspection_mod._HOI_TYPE_ROWS
     self.assertEqual(len(rows), 31)
     self.assertTrue(all(len(row.ids) == 4 for row in rows))
-
-  def test_only_padding_row_has_zero_ids(self):
-    rows = introspection_mod._HOI_TYPE_ROWS
     for idx, row in enumerate(rows):
       if idx == len(rows) - 1:
         self.assertEqual(row.ids, (0, 0, 0, 0))
@@ -771,6 +768,81 @@ class TestIntrospectionTypeGridInvariants(unittest.TestCase):
         self.assertEqual(
           introspection_mod.get_introspection_type_category(retval_id), "ReturnValue"
         )
+
+
+class TestIntrospectionTypeSetsAndClassification(unittest.TestCase):
+  def _row_ids(self, dotnet_name: str) -> tuple[int, int, int, int]:
+    row = next(r for r in introspection_mod._HOI_TYPE_ROWS if r.dotnet_name == dotnet_name)
+    return row.ids
+
+  def test_complex_method_and_struct_sets_are_disjoint(self):
+    self.assertTrue(
+      introspection_mod._COMPLEX_METHOD_TYPE_IDS.isdisjoint(
+        introspection_mod._COMPLEX_STRUCT_TYPE_IDS
+      )
+    )
+
+  def test_all_complex_set_is_union_of_method_and_struct_sets(self):
+    self.assertEqual(
+      introspection_mod._ALL_COMPLEX_TYPE_IDS,
+      introspection_mod._COMPLEX_METHOD_TYPE_IDS | introspection_mod._COMPLEX_STRUCT_TYPE_IDS,
+    )
+
+  def test_struct_and_enum_reference_sets_are_disjoint(self):
+    self.assertTrue(
+      introspection_mod._STRUCT_REF_TYPE_IDS.isdisjoint(introspection_mod._ENUM_REF_TYPE_IDS)
+    )
+
+  def test_parameter_type_struct_refs_cover_all_directions_and_struct_sentinels(self):
+    struct_ids = self._row_ids("struct") + self._row_ids("struct[]")
+    for tid in struct_ids + (30, 31):
+      pt = ParameterType(tid, source_id=2, ref_id=1)
+      self.assertTrue(pt.is_complex)
+      self.assertTrue(pt.is_struct_ref)
+      self.assertFalse(pt.is_enum_ref)
+
+  def test_parameter_type_enum_refs_cover_all_directions_and_struct_sentinels(self):
+    enum_ids = self._row_ids("enum") + self._row_ids("enum[]")
+    for tid in enum_ids + (32, 35):
+      pt = ParameterType(tid, source_id=2, ref_id=1)
+      self.assertTrue(pt.is_complex)
+      self.assertTrue(pt.is_enum_ref)
+      self.assertFalse(pt.is_struct_ref)
+
+  def test_scalar_parameter_type_is_not_complex_or_reference(self):
+    scalar_id = self._row_ids("i32")[0]
+    pt = ParameterType(scalar_id)
+    self.assertFalse(pt.is_complex)
+    self.assertFalse(pt.is_struct_ref)
+    self.assertFalse(pt.is_enum_ref)
+
+
+class TestIntrospectionTypeParsers(unittest.TestCase):
+  def test_parse_method_param_types_supports_simple_ref_and_node_global(self):
+    # [i8 simple] + [struct ref source=2 id=1] + [struct ref source=4 id=9 "01" ]
+    raw = [1, 57, 2, 1, 57, 4, 9, 0x22, 0x30, 0x31, 0x22, 0x20]
+    parsed = introspection_mod._parse_method_param_types(raw)
+    self.assertEqual(len(parsed), 3)
+    self.assertEqual([pt.type_id for pt in parsed], [1, 57, 57])
+    self.assertEqual([pt._byte_width for pt in parsed], [1, 3, 8])
+    self.assertEqual((parsed[1].source_id, parsed[1].ref_id), (2, 1))
+    self.assertEqual((parsed[2].source_id, parsed[2].ref_id), (4, 9))
+
+  def test_parse_struct_field_types_supports_simple_ref_and_node_global(self):
+    # [F32 simple] + [STRUCT source=2 id=3] + [STRUCT source=4 id=7 ModHi ModLo NodeHi NodeLo]
+    raw = [40, 30, 2, 3, 30, 4, 7, 0x00, 0x01, 0x00, 0x02]
+    parsed = introspection_mod._parse_struct_field_types(raw)
+    self.assertEqual(len(parsed), 3)
+    self.assertEqual([pt.type_id for pt in parsed], [40, 30, 30])
+    self.assertEqual([pt._byte_width for pt in parsed], [1, 3, 7])
+    self.assertEqual((parsed[1].source_id, parsed[1].ref_id), (2, 3))
+    self.assertEqual((parsed[2].source_id, parsed[2].ref_id), (4, 7))
+
+  def test_struct_parser_byte_width_sum_matches_cursor_advance(self):
+    raw = [40, 30, 2, 3, 30, 4, 7, 0x00, 0x01, 0x00, 0x02]
+    parsed = introspection_mod._parse_struct_field_types(raw)
+    bytes_used = sum(pt._byte_width for pt in parsed[:3])
+    self.assertEqual(bytes_used, len(raw))
 
 
 class _MinimalIntroBackend:
