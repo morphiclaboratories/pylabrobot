@@ -926,9 +926,7 @@ class TestHamiltonIntrospectionLazyCaches(unittest.IsolatedAsyncioTestCase):
     async def fake_ensure(addr, iface_id):
       touched.append(iface_id)
       key = (addr, iface_id)
-      self.intro._structs_by_addr_iface[key] = {0: st}
-      self.intro._enums_by_addr_iface[key] = {}
-      self.intro._iface_types_loaded.add(key)
+      self.intro._iface_types[key] = ({0: st}, {})
 
     self.intro.ensure_structs_enums = fake_ensure  # type: ignore[method-assign]
 

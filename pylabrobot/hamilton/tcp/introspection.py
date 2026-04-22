@@ -79,7 +79,7 @@ class HamiltonTCPIntrospectionBackend(Protocol):
   """
 
   @property
-  def registry(self) -> Any: ...
+  def registry(self) -> ObjectRegistry: ...
 
   def get_root_object_addresses(self) -> list[Address]: ...
 
@@ -95,8 +95,6 @@ class HamiltonTCPIntrospectionBackend(Protocol):
     raise_on_error: bool = True,
     read_timeout: Optional[float] = None,
   ) -> Any: ...
-
-  async def resolve_path(self, path: str) -> Address: ...
 
 
 async def _subobject_address_and_info(
@@ -213,9 +211,17 @@ _COMPLEX_METHOD_ROW_NAMES = frozenset(
 _HOI_PARAM_DIRECTION: tuple[str, ...] = ("In", "Out", "InOut", "RetVal")
 
 
-def _build_introspection_maps() -> (
-  tuple[dict[int, str], set[int], set[int], set[int], set[int], frozenset[int], frozenset[int], frozenset[int]]
-):
+def _build_introspection_maps() -> tuple[
+  dict[int, str],
+  set[int],
+  set[int],
+  set[int],
+  frozenset[int],
+  frozenset[int],
+  frozenset[int],
+  frozenset[int],
+  frozenset[int],
+]:
   names: dict[int, str] = {0: "void"}
   arg_ids: set[int] = set()
   ret_el_ids: set[int] = set()
@@ -250,9 +256,15 @@ def _build_introspection_maps() -> (
 
   all_complex = frozenset(complex_method_ids | _COMPLEX_STRUCT)
   return (
-    names, arg_ids, ret_el_ids, ret_val_ids,
-    frozenset(complex_method_ids), _COMPLEX_STRUCT,
-    frozenset(struct_ref_ids), frozenset(enum_ref_ids), all_complex,
+    names,
+    arg_ids,
+    ret_el_ids,
+    ret_val_ids,
+    frozenset(complex_method_ids),
+    _COMPLEX_STRUCT,
+    frozenset(struct_ref_ids),
+    frozenset(enum_ref_ids),
+    all_complex,
   )
 
 
@@ -270,7 +282,7 @@ def _build_introspection_maps() -> (
 
 # Empirical device behavior: type_id=113 appears as Argument on some firmware,
 # despite the static grid column implying RetVal.
-_INTROSPECTION_TYPE_NAMES[113] = "List[f32] [In] (empirical)" # TODO: Re-validate or remove
+_INTROSPECTION_TYPE_NAMES[113] = "List[f32] [In] (empirical)"  # TODO: Re-validate or remove
 _ARGUMENT_TYPE_IDS.add(113)
 
 
@@ -323,7 +335,10 @@ class ObjectInfo:
 
 
 class ObjectRegistry:
-  """Object graph cache keyed by both path and address."""
+  """Pure key-value cache: path ↔ ObjectInfo and address → path.
+
+  No async logic; all traversal lives in :class:`HamiltonIntrospection`.
+  """
 
   def __init__(self):
     self._objects: Dict[str, ObjectInfo] = {}
@@ -340,55 +355,12 @@ class ObjectRegistry:
     self._objects[path] = obj
     self._address_to_path[obj.address] = path
 
+  def address_for(self, path: str) -> Optional[Address]:
+    obj = self._objects.get(path)
+    return obj.address if obj is not None else None
+
   def path(self, address: Address) -> Optional[str]:
     return self._address_to_path.get(address)
-
-  async def resolve(self, path: str, transport: Any) -> Address:
-    """Resolve dot-path to address via lazy introspection."""
-    if path in self._objects:
-      return cast(Address, self._objects[path].address)
-
-    parts = [p for p in path.split(".") if p]
-    if not parts:
-      raise KeyError(f"Invalid path: '{path}'")
-
-    parent_path = ".".join(parts[:-1])
-    child_name = parts[-1]
-
-    introspection_obj = getattr(transport, "introspection", None)
-    if introspection_obj is None:
-      raise TypeError("ObjectRegistry.resolve requires transport.introspection")
-    introspection = cast("HamiltonIntrospection", introspection_obj)
-    if not parent_path:
-      if not self._root_addresses:
-        raise KeyError("No root addresses; run discovery first")
-      parent_addr = self._root_addresses[0]
-      parent_info = await introspection.get_object(parent_addr)
-      parent_info.children = {}
-      self.register(parent_info.name, parent_info)
-      if parent_info.name == child_name:
-        return parent_info.address
-      raise KeyError(f"Root object is '{parent_info.name}', not '{child_name}'")
-
-    parent_addr = await self.resolve(parent_path, transport)
-    parent_info = self._objects[parent_path]
-    supported = await introspection.get_supported_interface0_method_ids(parent_addr)
-    if GET_SUBOBJECT_ADDRESS not in supported:
-      raise KeyError(
-        f"Object at path '{parent_path}' does not support GetSubobjectAddress "
-        f"(interface 0, method 3); cannot resolve child '{child_name}'"
-      )
-
-    for i in range(parent_info.subobject_count):
-      sub_addr, sub_info = await _subobject_address_and_info(introspection, parent_addr, i)
-      sub_info.children = {}
-      child_path = f"{parent_path}.{sub_info.name}"
-      parent_info.children[sub_info.name] = sub_info
-      self.register(child_path, sub_info)
-      if sub_info.name == child_name:
-        return sub_info.address
-
-    raise KeyError(f"Child '{child_name}' not found under '{parent_path}'")
 
 
 @dataclass
@@ -556,7 +528,9 @@ def _parse_method_param_types(
         end += 1  # consume closing '"'
         if end < len(ints) and ints[end] == _SPACE:
           end += 1  # consume trailing ' '
-        result.append(ParameterType(tid, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=end - i))
+        result.append(
+          ParameterType(tid, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=end - i)
+        )
         i = end
       else:
         result.append(ParameterType(tid, source_id=source_id, ref_id=ref_id, _byte_width=3))
@@ -595,7 +569,9 @@ def _parse_struct_field_types(
       ref_id = ints[i + 2]
       if source_id == _NODE_GLOBAL:
         # [type_id, 4, index, ModHi, ModLo, NodeHi, NodeLo] = 7 bytes
-        result.append(ParameterType(tid, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=_NODE_GLOBAL_WIDTH))
+        result.append(
+          ParameterType(tid, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=_NODE_GLOBAL_WIDTH)
+        )
         i += _NODE_GLOBAL_WIDTH
       else:
         result.append(ParameterType(tid, source_id=source_id, ref_id=ref_id, _byte_width=3))
@@ -765,10 +741,7 @@ class TypeRegistry:
     source_id=3: Built-in / network types (e.g. NetworkResult-shaped); resolve_struct
       does not decode these yet — validate behavior vs Piglet or device captures.
 
-  source_id=0 (same-interface references) appears in nested struct field type bytes;
-  indexing for method-level params and whether to use GlobalTypePool.resolve_struct_local
-  vs. this registry should be validated on hardware — do not assume the same 1-based rule
-  as source_id=2 locals.
+  source_id=0 is not emitted by firmware; treat any such ref as unresolvable.
 
   For source_id=2, pass ``ho_interface_id`` on ``resolve_struct`` / ``resolve_enum`` so
   lookup is strict to the owning interface's local table.
@@ -1327,9 +1300,9 @@ class HamiltonIntrospection:
     self.backend = backend
     # Session caches (invalidated when the client drops the introspection facet, e.g. reconnect).
     self._method_table_by_address: Dict[Address, List[MethodInfo]] = {}
-    self._structs_by_addr_iface: Dict[Tuple[Address, int], Dict[int, StructInfo]] = {}
-    self._enums_by_addr_iface: Dict[Tuple[Address, int], Dict[int, EnumInfo]] = {}
-    self._iface_types_loaded: Set[Tuple[Address, int]] = set()
+    self._iface_types: Dict[
+      Tuple[Address, int], Tuple[Dict[int, StructInfo], Dict[int, EnumInfo]]
+    ] = {}
     self._interfaces_by_address: Dict[Address, List[InterfaceInfo]] = {}
     self._hc_result_text_by_addr_iface: Dict[Tuple[Address, int], Dict[int, str]] = {}
     self._supported_i0_by_address: Dict[Address, Set[int]] = {}
@@ -1339,9 +1312,7 @@ class HamiltonIntrospection:
   def clear_session_caches(self) -> None:
     """Drop cached method tables, per-interface structs/enums, and the global type pool."""
     self._method_table_by_address.clear()
-    self._structs_by_addr_iface.clear()
-    self._enums_by_addr_iface.clear()
-    self._iface_types_loaded.clear()
+    self._iface_types.clear()
     self._interfaces_by_address.clear()
     self._hc_result_text_by_addr_iface.clear()
     self._supported_i0_by_address.clear()
@@ -1352,11 +1323,11 @@ class HamiltonIntrospection:
     self, registry: TypeRegistry, addr: Address, iface_id: int
   ) -> None:
     """Copy cached structs/enums for (addr, iface_id) into *registry*."""
-    key = (addr, iface_id)
-    if key in self._structs_by_addr_iface:
-      registry.structs[iface_id] = dict(self._structs_by_addr_iface[key])
-    if key in self._enums_by_addr_iface:
-      registry.enums[iface_id] = dict(self._enums_by_addr_iface[key])
+    entry = self._iface_types.get((addr, iface_id))
+    if entry is not None:
+      structs_map, enums_map = entry
+      registry.structs[iface_id] = dict(structs_map)
+      registry.enums[iface_id] = dict(enums_map)
 
   async def _ensure_parameter_types_for_signature(
     self,
@@ -1424,14 +1395,24 @@ class HamiltonIntrospection:
           continue
 
         interfaces = await self.get_interfaces(addr, _supported=supported)
+        # source_id=1 refs index into the first non-zero interface's struct/enum list
+        # (firmware always resolves via interface_id=1; see HoiObject.HandleStruct).
+        # Populate interface_structs for all interfaces, but only extend the flat pool
+        # from the first non-zero interface so ref_ids remain valid.
+        first_nonzero_seen = False
         for iface in interfaces:
+          if iface.interface_id == 0:
+            continue
           if GET_STRUCTS in supported:
             structs = await self.get_structs(addr, iface.interface_id)
-            pool.structs.extend(structs)
             pool.interface_structs[iface.interface_id] = {s.struct_id: s for s in structs}
+            if not first_nonzero_seen:
+              pool.structs.extend(structs)
           if GET_ENUMS in supported:
             enums = await self.get_enums(addr, iface.interface_id)
-            pool.enums.extend(enums)
+            if not first_nonzero_seen:
+              pool.enums.extend(enums)
+          first_nonzero_seen = True
       except _TRANSIENT_ERRORS:
         raise
       except Exception as e:
@@ -1496,7 +1477,7 @@ class HamiltonIntrospection:
     """Run GetStructs/GetEnums for one HO interface and cache under ``(address, interface_id)``."""
     addr = await self._resolve_target_address(address)
     key = (addr, interface_id)
-    if key in self._iface_types_loaded:
+    if key in self._iface_types:
       return
     supported = await self.get_supported_interface0_method_ids(addr)
     structs_map: Dict[int, StructInfo] = {}
@@ -1507,14 +1488,12 @@ class HamiltonIntrospection:
     if GET_ENUMS in supported:
       enums = await self.get_enums(addr, interface_id)
       enums_map = {e.enum_id: e for e in enums}
-    self._structs_by_addr_iface[key] = structs_map
-    self._enums_by_addr_iface[key] = enums_map
+    self._iface_types[key] = (structs_map, enums_map)
     hc_result = next((e for e in enums_map.values() if e.name == "HcResult"), None)
     if hc_result is not None:
       self._hc_result_text_by_addr_iface[key] = {int(v): n for n, v in hc_result.values.items()}
     else:
       self._hc_result_text_by_addr_iface[key] = {}
-    self._iface_types_loaded.add(key)
 
   async def get_interface_name(
     self, address: Union[Address, str], interface_id: int
@@ -1536,7 +1515,7 @@ class HamiltonIntrospection:
     """Resolve HcResult enum text for one interface using cached enums."""
     addr = await self._resolve_target_address(address)
     key = (addr, interface_id)
-    if key not in self._iface_types_loaded:
+    if key not in self._iface_types:
       await self.ensure_structs_enums(addr, interface_id)
     return self._hc_result_text_by_addr_iface.get(key, {}).get(code)
 
@@ -1573,62 +1552,125 @@ class HamiltonIntrospection:
     return lines
 
   async def _resolve_target_address(self, addr_or_path: Union[Address, str]) -> Address:
-    """Resolve Address or dot-path through the backend resolver consistently."""
+    """Resolve Address or dot-path to Address."""
     if isinstance(addr_or_path, str):
-      return cast(Address, await self.backend.resolve_path(addr_or_path))
+      return await self.resolve_path(addr_or_path)
     return addr_or_path
 
+  async def _walk_node(
+    self, addr: Address, path: Optional[str], visited: Set[Address]
+  ) -> Optional[FirmwareTreeNode]:
+    """Walk one firmware object node, register it, and recurse into children.
+
+    Used by :meth:`_build_firmware_tree` for a full eager DFS.
+    Pass ``path=None`` to derive the path from the object's own name (root nodes).
+    Returns ``None`` if *addr* was already visited.
+    """
+    if addr in visited:
+      return None
+    visited.add(addr)
+
+    obj = await self.get_object(addr)
+    if path is None:
+      path = obj.name
+    supported = await self.get_supported_interface0_method_ids(addr)
+    node = FirmwareTreeNode(
+      path=path,
+      address=addr,
+      object_info=obj,
+      supported_interface0_methods=supported,
+    )
+    self.backend.registry.register(path, obj)
+
+    # Keep this guard even though Interface-0 method 3 (GetSubobjectAddress)
+    # appears ubiquitous in current PREP captures.
+    if GET_SUBOBJECT_ADDRESS not in supported:
+      return node
+
+    for i in range(obj.subobject_count):
+      try:
+        sub_addr, sub_obj = await _subobject_address_and_info(self, addr, i)
+        obj.children[sub_obj.name] = sub_obj
+        child = await self._walk_node(sub_addr, f"{path}.{sub_obj.name}", visited)
+        if child is not None:
+          node.children.append(child)
+      except _TRANSIENT_ERRORS:
+        raise
+      except Exception as e:
+        logger.debug("walk child failed for %s idx=%d: %s", addr, i, e)
+    return node
+
+  async def resolve_path(self, path: str) -> Address:
+    """Resolve a dot-path (e.g. ``"MLPrepRoot.MphRoot.MPH"``) to an :class:`Address`.
+
+    Checks the registry cache first. On a miss, resolves one segment at a time —
+    enumerating only the children needed at each level — so deep paths on large
+    firmware trees do not trigger a full tree walk.
+    Raises :exc:`KeyError` if the path cannot be found.
+    """
+    cached = self.backend.registry.address_for(path)
+    if cached is not None:
+      return cached
+
+    parts = [p for p in path.split(".") if p]
+    if not parts:
+      raise KeyError(f"Invalid path: '{path}'")
+
+    roots = self.backend.get_root_object_addresses()
+    if not roots:
+      raise KeyError(f"No root addresses; cannot resolve path '{path}'")
+
+    root_addr = roots[0]
+    root_obj = await self.get_object(root_addr)
+    self.backend.registry.register(root_obj.name, root_obj)
+    if root_obj.name != parts[0]:
+      raise KeyError(f"Root object is '{root_obj.name}', not '{parts[0]}'")
+    if len(parts) == 1:
+      return root_addr
+
+    current_addr = root_addr
+    current_path = parts[0]
+    for part in parts[1:]:
+      next_path = f"{current_path}.{part}"
+      cached = self.backend.registry.address_for(next_path)
+      if cached is not None:
+        current_addr = cached
+        current_path = next_path
+        continue
+
+      obj = await self.get_object(current_addr)
+      supported = await self.get_supported_interface0_method_ids(current_addr)
+      if GET_SUBOBJECT_ADDRESS not in supported:
+        raise KeyError(
+          f"'{current_path}' does not support GetSubobjectAddress; cannot resolve child '{part}'"
+        )
+
+      found: Optional[Address] = None
+      for i in range(obj.subobject_count):
+        sub_addr, sub_obj = await _subobject_address_and_info(self, current_addr, i)
+        self.backend.registry.register(f"{current_path}.{sub_obj.name}", sub_obj)
+        if sub_obj.name == part:
+          found = sub_addr
+
+      if found is None:
+        raise KeyError(f"Child '{part}' not found under '{current_path}'")
+      current_addr = found
+      current_path = next_path
+
+    return current_addr
+
   async def _build_firmware_tree(self) -> FirmwareTree:
-    """Build a DFS firmware tree from discovered root addresses."""
+    """Build a DFS firmware tree from all discovered root addresses."""
     roots = self.backend.get_root_object_addresses()
     tree = FirmwareTree()
     if not roots:
       return tree
 
     visited: Set[Address] = set()
-
-    async def walk(addr: Address, path: Optional[str] = None) -> Optional[FirmwareTreeNode]:
-      if addr in visited:
-        return None
-      visited.add(addr)
-
-      obj = await self.get_object(addr)
-      if path is None:
-        path = obj.name
-      supported = await self.get_supported_interface0_method_ids(addr)
-      node = FirmwareTreeNode(
-        path=path,
-        address=addr,
-        object_info=obj,
-        supported_interface0_methods=supported,
-      )
-
-      self.backend.registry.register(path, obj)
-
-      # Keep this guard even though Interface-0 method 3 (GetSubobjectAddress)
-      # appears ubiquitous in current PREP captures. If this remains stable
-      # across instruments/firmware, we can consider relaxing this check later.
-      if GET_SUBOBJECT_ADDRESS not in supported:
-        return node
-
-      for i in range(obj.subobject_count):
-        try:
-          sub_addr, sub_obj = await _subobject_address_and_info(self, addr, i)
-          obj.children[sub_obj.name] = sub_obj
-          child_path = f"{path}.{sub_obj.name}"
-          child = await walk(sub_addr, child_path)
-          if child is not None:
-            node.children.append(child)
-        except _TRANSIENT_ERRORS:
-          raise
-        except Exception as e:
-          logger.debug("walk child failed for %s idx=%d: %s", addr, i, e)
-      return node
-
     for addr in roots:
-      root_node = await walk(addr)
-      if root_node is not None:
-        tree.roots.append(root_node)
+      node = await self._walk_node(addr, None, visited)
+      if node is not None:
+        tree.roots.append(node)
     return tree
 
   async def get_firmware_tree(self, refresh: bool = False) -> FirmwareTree:

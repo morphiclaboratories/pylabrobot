@@ -708,8 +708,8 @@ class HamiltonTCPClient(Driver):
     raise last_error
 
   async def resolve_path(self, path: str) -> Address:
-    """Resolve strict dot-path target to Address."""
-    return await self._registry.resolve(path, self)
+    """Resolve dot-path to Address (delegates to introspection)."""
+    return await self.introspection.resolve_path(path)
 
   async def resolve_target(
     self,
