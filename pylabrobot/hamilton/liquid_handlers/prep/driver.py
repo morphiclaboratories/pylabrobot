@@ -41,6 +41,7 @@ _EXPECTED_ROOT = "MLPrepRoot"
 # Canonical firmware path strings (single source for driver, chatterbox, probes).
 MLPREP_OBJECT_PATH = "MLPrepRoot.MLPrep"
 PIPETTOR_OBJECT_PATH = "MLPrepRoot.PipettorRoot.Pipettor"
+MPH_OBJECT_PATH = "MLPrepRoot.MphRoot.MPH"
 
 
 @dataclass

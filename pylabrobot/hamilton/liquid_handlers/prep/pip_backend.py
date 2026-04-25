@@ -22,6 +22,7 @@ from typing import (
   Optional,
   Sequence,
   Tuple,
+  TypeVar,
   Union,
   cast,
 )
@@ -61,9 +62,179 @@ from .channels import (
   discover_channel_drives,
   request_channel_bounds,
 )
-from .liquid_defaults import fill_in_defaults
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+# =============================================================================
+# Shared pure helpers (also imported by PrepMPHBackend)
+# =============================================================================
+
+
+def fill_in_defaults(val: Optional[List[_T]], default: List[_T]) -> List[_T]:
+  """Convert optional per-channel overrides into a full list matching ``default`` length."""
+  if val is None:
+    return default
+  if len(val) != len(default):
+    raise ValueError(f"Value length must equal num operations ({len(default)}), but is {len(val)}")
+  return [v if v is not None else d for v, d in zip(val, default)]
+
+
+class LLDMode(enum.Enum):
+  """Liquid level detection mode.
+
+  Same numbering as STARBackend.LLDMode for cross-backend compatibility.
+  CAPACITIVE (value=1) is named GAMMA on the STAR — CAPACITIVE is the correct term.
+  The Prep firmware uses separate command variants for LLD vs no-LLD, so all
+  channels in a single aspirate/dispense call must use the same mode category
+  (any LLD mode, or OFF).
+  """
+
+  OFF = 0
+  CAPACITIVE = 1  # STARBackend.LLDMode.GAMMA — capacitive (cLLD)
+  PRESSURE = 2  # pressure-based (pLLD)
+  DUAL = 3  # both capacitive and pressure
+
+
+@dataclass(frozen=True)
+class _LldDefaults:
+  """Resolved pLLD / cLLD parameter pair (shared between aspirate and dispense)."""
+
+  p_lld: PrepCmd.PLldParameters
+  c_lld: PrepCmd.CLldParameters
+
+
+def default_lld_params(
+  effective_lld: bool,
+  p_lld: Optional[PrepCmd.PLldParameters] = None,
+  c_lld: Optional[PrepCmd.CLldParameters] = None,
+) -> _LldDefaults:
+  """Build resolved pLLD / cLLD defaults.
+
+  When LLD is active and no caller override is given, returns non-default
+  parameters (``default_values=False``) so the firmware actually triggers
+  detection.  Otherwise returns firmware defaults.
+  """
+  if effective_lld:
+    resolved_p = p_lld or PrepCmd.PLldParameters(
+      default_values=False,
+      sensitivity=1,
+      dispenser_seek_speed=0.0,
+      lld_height_difference=0.0,
+      detect_mode=0,
+    )
+    resolved_c = c_lld or PrepCmd.CLldParameters(
+      default_values=False,
+      sensitivity=4,
+      clot_check_enable=False,
+      z_clot_check=0.0,
+      detect_mode=0,
+    )
+  else:
+    resolved_p = p_lld or PrepCmd.PLldParameters.default()
+    resolved_c = c_lld or PrepCmd.CLldParameters.default()
+  return _LldDefaults(p_lld=resolved_p, c_lld=resolved_c)
+
+
+def lld_for_well(
+  effective_lld: bool, lld: Optional[PrepCmd.LldParameters], top_of_well_z: float
+) -> PrepCmd.LldParameters:
+  """Per-channel LLD seek parameters from caller override or well geometry."""
+  if effective_lld and lld is None:
+    return PrepCmd.LldParameters(
+      default_values=False,
+      search_start_position=top_of_well_z,
+      channel_speed=5.0,
+      z_submerge=2.0,
+      z_out_of_liquid=0.0,
+    )
+  return lld or PrepCmd.LldParameters.default()
+
+
+def segments_to_cone_geometry(
+  segments: list[PrepCmd.SegmentDescriptor], fallback_radius: float
+) -> Tuple[float, float, float]:
+  """Convert v2 frustum segments to v1 cone model (tube_radius, cone_height, cone_bottom_radius)."""
+  if not segments:
+    return (fallback_radius, 0.0, 0.0)
+  total_height = sum(s.height for s in segments)
+  if total_height <= 0:
+    return (fallback_radius, 0.0, 0.0)
+  weighted_area = sum(s.height * (s.area_top + s.area_bottom) / 2.0 for s in segments)
+  avg_area = weighted_area / total_height
+  tube_radius = math.sqrt(avg_area / math.pi)
+  bot = segments[0]
+  if abs(bot.area_bottom - bot.area_top) > 1e-6:
+    cone_height = bot.height
+    cone_bottom_radius = math.sqrt(bot.area_bottom / math.pi)
+  else:
+    cone_height = 0.0
+    cone_bottom_radius = 0.0
+  return (tube_radius, cone_height, cone_bottom_radius)
+
+
+def patch_common_with_cone(
+  common: PrepCmd.CommonParameters, segments: list[PrepCmd.SegmentDescriptor]
+) -> PrepCmd.CommonParameters:
+  """Return CommonParameters with cone geometry derived from segments (v2→v1 downgrade)."""
+  if len(segments) > 1:
+    logger.warning(
+      "v1 command selected: collapsing %d container segments into single cone approximation. "
+      "Liquid following accuracy may be reduced for complex container geometries.",
+      len(segments),
+    )
+  tube_r, cone_h, cone_br = segments_to_cone_geometry(segments, common.tube_radius)
+  return PrepCmd.CommonParameters(
+    default_values=common.default_values,
+    empty=common.empty,
+    z_minimum=common.z_minimum,
+    z_final=common.z_final,
+    z_liquid_exit_speed=common.z_liquid_exit_speed,
+    liquid_volume=common.liquid_volume,
+    liquid_speed=common.liquid_speed,
+    transport_air_volume=common.transport_air_volume,
+    tube_radius=tube_r,
+    cone_height=cone_h,
+    cone_bottom_radius=cone_br,
+    settling_time=common.settling_time,
+    additional_probes=common.additional_probes,
+  )
+
+
+def resolve_command_version(
+  supports_v2: Optional[bool],
+  use_v1_flag: bool,
+  override: Optional[Literal["v1", "v2"]],
+  *,
+  v2_error_hint: str = "v2 commands are not supported by this firmware.",
+) -> bool:
+  """Resolve whether to use v2 commands for a pipetting call. Returns True for v2.
+
+  Resolution order:
+  1. Per-call ``override`` ("v1" / "v2") — takes precedence.
+  2. Backend-level ``use_v1_flag`` / ``supports_v2`` probe result from setup.
+  """
+  if override == "v1":
+    return False
+  if override == "v2":
+    if supports_v2 is False:
+      raise ValueError(v2_error_hint)
+    return True
+  return supports_v2 is True
+
+
+def lld_seek_timeout(
+  lld_params: PrepCmd.LldParameters,
+  z_minimum: float,
+) -> Optional[float]:
+  """Compute a read timeout (s) for an LLD seek move, or None if not applicable."""
+  if lld_params.channel_speed > 0:
+    seek_distance = lld_params.search_start_position - z_minimum
+    if seek_distance > 0:
+      return seek_distance / lld_params.channel_speed + 5.0
+  return None
 
 
 @dataclass
@@ -196,54 +367,6 @@ def _build_container_segments(resource) -> list[PrepCmd.SegmentDescriptor]:
   ]
 
 
-def _segments_to_cone_geometry(
-  segments: list[PrepCmd.SegmentDescriptor], fallback_radius: float
-) -> Tuple[float, float, float]:
-  """Convert v2 frustum segments to v1 cone model (tube_radius, cone_height, cone_bottom_radius).
-
-  The v1 firmware models container geometry as a cylinder (tube_radius) with an
-  optional cone at the bottom (cone_height, cone_bottom_radius). Given N frustum
-  segments from the v2 container_description:
-
-  - tube_radius: sqrt(volume-weighted-average-area / pi) over all segments,
-    giving the equivalent constant-area cylinder that displaces the same total
-    volume per unit height.
-  - cone_height / cone_bottom_radius: derived from the bottom segment when it
-    tapers (area_bottom != area_top); zero when the bottom is cylindrical.
-
-  For uniform cylinders this is exact. For tapered wells it is a best-fit
-  single-frustum approximation — the firmware gets one linear dz/dt instead of
-  piecewise, but total volume displacement matches.
-
-  Args:
-    segments: SegmentDescriptor list (may be empty).
-    fallback_radius: Radius to return when segments is empty (from _effective_radius).
-
-  Returns:
-    (tube_radius, cone_height, cone_bottom_radius)
-  """
-  if not segments:
-    return (fallback_radius, 0.0, 0.0)
-
-  total_height = sum(s.height for s in segments)
-  if total_height <= 0:
-    return (fallback_radius, 0.0, 0.0)
-
-  # Volume-weighted average cross-sectional area across all segments.
-  weighted_area = sum(s.height * (s.area_top + s.area_bottom) / 2.0 for s in segments)
-  avg_area = weighted_area / total_height
-  tube_radius = math.sqrt(avg_area / math.pi)
-
-  # Bottom cone: use first (bottom-most) segment if it tapers.
-  bot = segments[0]
-  if abs(bot.area_bottom - bot.area_top) > 1e-6:
-    cone_height = bot.height
-    cone_bottom_radius = math.sqrt(bot.area_bottom / math.pi)
-  else:
-    cone_height = 0.0
-    cone_bottom_radius = 0.0
-
-  return (tube_radius, cone_height, cone_bottom_radius)
 
 
 class _WellGeometry(NamedTuple):
@@ -255,22 +378,32 @@ class _WellGeometry(NamedTuple):
   z_air: float
 
 
-def _absolute_z_from_well(op, z_air_margin_mm: float = 2.0) -> _WellGeometry:
-  """Compute absolute Z values from well geometry for aspirate/dispense (STAR-aligned).
+def _absolute_z_from_well(
+  resource,
+  liquid_height: Optional[float] = None,
+  offset_z: float = 0.0,
+  z_air_margin_mm: float = 2.0,
+) -> _WellGeometry:
+  """Compute absolute Z values from well/container geometry for aspirate/dispense.
 
-  The resource must have get_size_z() (e.g. a well/container); otherwise raises ValueError.
+  Args:
+    resource: Well or Container with get_size_z().
+    liquid_height: Distance from well bottom to liquid surface (mm). None = 0.
+    offset_z: Additional Z applied to the bottom position (e.g. from op.offset.z).
+    z_air_margin_mm: Clearance above well opening for z_air (approach/exit height).
+
+  Returns:
+    _WellGeometry with well_bottom, liquid_surface, top_of_well, z_air.
   """
-  loc = op.resource.get_absolute_location("c", "c", "cavity_bottom")
-  well_bottom_z = loc.z + op.offset.z
-  liquid_surface_z = well_bottom_z + (op.liquid_height or 0.0)
-
-  if not hasattr(op.resource, "get_size_z"):
+  if not hasattr(resource, "get_size_z"):
     raise ValueError(
       "Resource must have get_size_z() to derive absolute Z (e.g. a Well or Container). "
       "Pass z_minimum, z_fluid, z_air explicitly for this operation."
     )
-  size_z = op.resource.get_size_z()
-  top_of_well_z = loc.z + size_z
+  loc = resource.get_absolute_location("c", "c", "cavity_bottom")
+  well_bottom_z = loc.z + offset_z
+  liquid_surface_z = well_bottom_z + (liquid_height or 0.0)
+  top_of_well_z = loc.z + resource.get_size_z()
   z_air_z = top_of_well_z + z_air_margin_mm
   return _WellGeometry(well_bottom_z, liquid_surface_z, top_of_well_z, z_air_z)
 
@@ -293,14 +426,6 @@ _CHANNEL_TO_WASTE_NAME = {
 
 # Expected root name from discovery; validated at setup().
 _EXPECTED_ROOT = "MLPrepRoot"
-
-
-@dataclass(frozen=True)
-class _LldDefaults:
-  """Resolved pLLD / cLLD parameter pair (shared between aspirate and dispense)."""
-
-  p_lld: PrepCmd.PLldParameters
-  c_lld: PrepCmd.CLldParameters
 
 
 @dataclass(frozen=True)
@@ -372,21 +497,9 @@ class PrepPIPBackend(PIPBackend):
   :meth:`Prep.setup` before :meth:`_on_setup`.
   """
 
-  class LLDMode(enum.Enum):
-    """Liquid level detection mode.
-
-    Same numbering as STARBackend.LLDMode for cross-backend compatibility.
-    CAPACITIVE (value=1) is named GAMMA on the STAR — CAPACITIVE is the correct term.
-    The Prep firmware uses separate command variants for LLD vs no-LLD, so all
-    channels in a single aspirate/dispense call must use the same mode category
-    (any LLD mode, or OFF). Mixing OFF with CAPACITIVE/PRESSURE in one call is
-    not supported and will raise ValueError.
-    """
-
-    OFF = 0
-    CAPACITIVE = 1  # STARBackend.LLDMode.GAMMA — capacitive (cLLD)
-    PRESSURE = 2  # pressure-based (pLLD)
-    DUAL = 3  # both capacitive and pressure
+  # Re-export the module-level LLDMode so existing code using
+  # PrepPIPBackend.LLDMode continues to work unchanged.
+  LLDMode = LLDMode
 
   # V2 aspirate/dispense command IDs (interface 1 on Pipettor).
   _V2_PIPETTING_CMD_IDS = {38, 39, 40, 41, 42, 43}
@@ -431,23 +544,15 @@ class PrepPIPBackend(PIPBackend):
     return self._V2_PIPETTING_CMD_IDS.issubset(iface1_ids)
 
   def _resolve_command_version(self, override: Optional[Literal["v1", "v2"]] = None) -> bool:
-    """Resolve whether to use v2 commands for this call. Returns True for v2.
-
-    Resolution order:
-    1. Per-call override ("v1" or "v2") — takes precedence. Raises ValueError
-       if "v2" requested but firmware doesn't support it.
-    2. Backend-level ``use_v1_aspirate_dispense`` / probe result from setup.
-    """
-    if override == "v1":
-      return False
-    if override == "v2":
-      if self._supports_v2_pipetting is False:
-        raise ValueError(
-          "v2 aspirate/dispense commands (cmd 38-43) are not supported by this firmware. "
-          "Use command_version='v1' or pass use_v1_aspirate_dispense=True to PrepPIPBackend."
-        )
-      return True
-    return self._supports_v2_pipetting is True
+    return resolve_command_version(
+      self._supports_v2_pipetting,
+      self._use_v1_aspirate_dispense,
+      override,
+      v2_error_hint=(
+        "v2 aspirate/dispense commands (cmd 38-43) are not supported by this firmware. "
+        "Use command_version='v1' or pass use_v1_aspirate_dispense=True to PrepPIPBackend."
+      ),
+    )
 
   # ---------------------------------------------------------------------------
   # Setup
@@ -723,138 +828,6 @@ class PrepPIPBackend(PIPBackend):
     )
 
   # ---------------------------------------------------------------------------
-  # MPH head tip operations
-  # ---------------------------------------------------------------------------
-
-  async def pick_up_tips_mph(
-    self,
-    tip_spot: Union[TipSpot, List[TipSpot]],
-    tip_mask: int = 0xFF,
-    final_z: Optional[float] = None,
-    seek_speed: float = 15.0,
-    z_seek_offset: Optional[float] = None,
-    enable_tadm: bool = False,
-    dispenser_volume: float = 0.0,
-    dispenser_speed: float = 250.0,
-  ) -> None:
-    """Pick up tips with the MPH (multi-probe) head.
-
-    Routes to MLPrepRoot.MphRoot.MPH (PickupTips, iface=1 id=9). The MPH
-    takes a single reference position (type_57 = single struct) rather than
-    a per-channel list (type_61). All 8 probes move as one unit; tip_mask
-    selects which channels engage (default 0xFF = all 8).
-
-    The first TipSpot is used as the reference position. For a full column
-    pickup, pass tip_rack["A1:H1"] — only the first spot's (x,y,z) is sent,
-    all 8 probes engage via tip_mask.
-
-    Args:
-      tip_spot: A single TipSpot or a list. The first spot is used as the
-        reference position for all probes.
-      tip_mask: 8-bit bitmask of active MPH channels (bit 0 = channel 0,
-        bit 7 = channel 7). Default 0xFF picks up with all 8 channels.
-      final_z: Traverse/safe height (mm) after command. If None, uses the
-        probed or user-set default traverse height.
-      seek_speed: Speed (mm/s) for the Z approach phase.
-      z_seek_offset: Additive mm offset on top of the geometry-based seek Z
-        (tip.fitting_depth + 5 mm). None = 0.
-      enable_tadm: Enable tip-attachment detection (TADM) during pickup.
-      dispenser_volume: Dispenser volume for TADM (ignored when False).
-      dispenser_speed: Dispenser speed for TADM (ignored when False).
-    """
-    if not self.has_mph:
-      raise RuntimeError("Instrument does not have an 8MPH head. Cannot use pick_up_tips_mph.")
-    if isinstance(tip_spot, list):
-      spots = tip_spot
-    else:
-      spots = [tip_spot]
-    if not spots:
-      raise ValueError("pick_up_tips_mph: tip_spot list is empty")
-    resolved_final_z = self._resolve_traverse_height(final_z)
-
-    ref_spot = spots[0]
-    tip = ref_spot.get_tip()
-    loc = ref_spot.get_absolute_location("c", "c", "t")
-    tip_parameters = PrepCmd.TipPositionParameters.for_op(
-      PrepCmd.ChannelIndex.MPHChannel, loc, tip, z_seek_offset=z_seek_offset
-    )
-
-    tip_definition = PrepCmd.TipPickupParameters(
-      default_values=False,
-      volume=tip.maximal_volume,
-      length=tip.total_tip_length - tip.fitting_depth,
-      tip_type=PrepCmd.TipTypes.StandardVolume,
-      has_filter=tip.has_filter,
-      is_needle=False,
-      is_tool=False,
-    )
-
-    await self._driver.send_command(
-      PrepCmd.MphPickupTips(
-        tip_parameters=tip_parameters,
-        final_z=resolved_final_z,
-        seek_speed=seek_speed,
-        tip_definition=tip_definition,
-        enable_tadm=enable_tadm,
-        dispenser_volume=dispenser_volume,
-        dispenser_speed=dispenser_speed,
-        tip_mask=tip_mask,
-      )
-    )
-
-  async def drop_tips_mph(
-    self,
-    tip_spot: Union[TipSpot, List[TipSpot]],
-    final_z: Optional[float] = None,
-    seek_speed: float = 30.0,
-    z_seek_offset: Optional[float] = None,
-    drop_type: PrepCmd.TipDropType = PrepCmd.TipDropType.FixedHeight,
-    tip_roll_off_distance: float = 0.0,
-  ) -> None:
-    """Drop tips held by the MPH head.
-
-    Routes to MLPrepRoot.MphRoot.MPH (DropTips, iface=1 id=12). The MPH
-    takes a single reference position (type_57 = single struct); all probes
-    drop together at the same location.
-
-    Args:
-      tip_spot: Target drop position. The first spot is used as the reference
-        position for all probes.
-      final_z: Traverse/safe height (mm) after command. If None, uses the
-        probed or user-set default traverse height.
-      seek_speed: Speed (mm/s) for the Z seek/approach phase.
-      z_seek_offset: Additive mm offset on top of the geometry-based seek Z.
-        None = 0 (default seeks tip_bottom + total_tip_length + 10 mm).
-      drop_type: How tips are released (FixedHeight, Stall, or CLLDSeek).
-      tip_roll_off_distance: Roll-off distance (mm) for tip release.
-    """
-    if not self.has_mph:
-      raise RuntimeError("Instrument does not have an 8MPH head. Cannot use drop_tips_mph.")
-    if isinstance(tip_spot, list):
-      spots = tip_spot
-    else:
-      spots = [tip_spot]
-    if not spots:
-      raise ValueError("drop_tips_mph: tip_spot list is empty")
-    resolved_final_z = self._resolve_traverse_height(final_z)
-
-    ref_spot = spots[0]
-    tip = ref_spot.get_tip()
-    loc = ref_spot.get_absolute_location("c", "c", "t")
-    drop_parameters = PrepCmd.TipDropParameters.for_op(
-      PrepCmd.ChannelIndex.MPHChannel, loc, tip, z_seek_offset=z_seek_offset, drop_type=drop_type
-    )
-
-    await self._driver.send_command(
-      PrepCmd.MphDropTips(
-        drop_parameters=drop_parameters,
-        final_z=resolved_final_z,
-        seek_speed=seek_speed,
-        tip_roll_off_distance=tip_roll_off_distance,
-      )
-    )
-
-  # ---------------------------------------------------------------------------
   # V1/V2 aspirate/dispense dispatch helpers
   # ---------------------------------------------------------------------------
 
@@ -862,34 +835,7 @@ class PrepPIPBackend(PIPBackend):
   def _patch_common_with_cone(
     common: PrepCmd.CommonParameters, segments: list[PrepCmd.SegmentDescriptor]
   ) -> PrepCmd.CommonParameters:
-    """Return a copy of CommonParameters with cone geometry derived from segments.
-
-    Used when downgrading a v2 parameter set to v1: the v2 container_description
-    is removed and its geometry information is folded into the v1 cone model
-    fields of CommonParameters.
-    """
-    if len(segments) > 1:
-      logger.warning(
-        "v1 command selected: collapsing %d container segments into single cone approximation. "
-        "Liquid following accuracy may be reduced for complex container geometries.",
-        len(segments),
-      )
-    tube_r, cone_h, cone_br = _segments_to_cone_geometry(segments, common.tube_radius)
-    return PrepCmd.CommonParameters(
-      default_values=common.default_values,
-      empty=common.empty,
-      z_minimum=common.z_minimum,
-      z_final=common.z_final,
-      z_liquid_exit_speed=common.z_liquid_exit_speed,
-      liquid_volume=common.liquid_volume,
-      liquid_speed=common.liquid_speed,
-      transport_air_volume=common.transport_air_volume,
-      tube_radius=tube_r,
-      cone_height=cone_h,
-      cone_bottom_radius=cone_br,
-      settling_time=common.settling_time,
-      additional_probes=common.additional_probes,
-    )
+    return patch_common_with_cone(common, segments)
 
   # ---------------------------------------------------------------------------
   # Shared LLD / TADM resolution helpers
@@ -935,46 +881,13 @@ class PrepPIPBackend(PIPBackend):
     p_lld: Optional[PrepCmd.PLldParameters] = None,
     c_lld: Optional[PrepCmd.CLldParameters] = None,
   ) -> _LldDefaults:
-    """Build resolved pLLD / cLLD defaults.
-
-    When LLD is active and no caller override is given, returns non-default
-    parameters (``default_values=False``) so the firmware actually triggers
-    detection.  Otherwise returns firmware defaults.
-    """
-    if effective_lld:
-      resolved_p = p_lld or PrepCmd.PLldParameters(
-        default_values=False,
-        sensitivity=1,
-        dispenser_seek_speed=0.0,
-        lld_height_difference=0.0,
-        detect_mode=0,
-      )
-      resolved_c = c_lld or PrepCmd.CLldParameters(
-        default_values=False,
-        sensitivity=4,
-        clot_check_enable=False,
-        z_clot_check=0.0,
-        detect_mode=0,
-      )
-    else:
-      resolved_p = p_lld or PrepCmd.PLldParameters.default()
-      resolved_c = c_lld or PrepCmd.CLldParameters.default()
-    return _LldDefaults(p_lld=resolved_p, c_lld=resolved_c)
+    return default_lld_params(effective_lld, p_lld, c_lld)
 
   @staticmethod
   def _lld_for_well(
     effective_lld: bool, lld: Optional[PrepCmd.LldParameters], top_of_well_z: float
   ) -> PrepCmd.LldParameters:
-    """Per-channel LLD seek parameters from caller override or well geometry."""
-    if effective_lld and lld is None:
-      return PrepCmd.LldParameters(
-        default_values=False,
-        search_start_position=top_of_well_z,
-        channel_speed=5.0,
-        z_submerge=2.0,
-        z_out_of_liquid=0.0,
-      )
-    return lld or PrepCmd.LldParameters.default()
+    return lld_for_well(effective_lld, lld, top_of_well_z)
 
   # ---------------------------------------------------------------------------
   # Shared channel resolution
@@ -1025,7 +938,7 @@ class PrepPIPBackend(PIPBackend):
 
     volumes = corrected_volumes_for_ops(ops, hlcs, dvc)
 
-    well_geometry = [_absolute_z_from_well(op) for op in ops]
+    well_geometry = [_absolute_z_from_well(op.resource, op.liquid_height, op.offset.z) for op in ops]
     raw_traverse = self._resolve_traverse_height(None)
     z_minimum = fill_in_defaults(z_minimum, [g.well_bottom for g in well_geometry])
     z_fluid = fill_in_defaults(z_fluid, [g.liquid_surface for g in well_geometry])
@@ -1603,12 +1516,8 @@ class PrepPIPBackend(PIPBackend):
 
     lld_read_timeout = read_timeout
     if lld_read_timeout is None and effective_lld and kits:
-      kit0_lld = kits[0].lld
-      if kit0_lld.channel_speed > 0:
-        min_z_min = min(k.common.z_minimum for k in kits)
-        seek_distance = kit0_lld.search_start_position - min_z_min
-        if seek_distance > 0:
-          lld_read_timeout = seek_distance / kit0_lld.channel_speed + 5.0
+      min_z_min = min(k.common.z_minimum for k in kits)
+      lld_read_timeout = lld_seek_timeout(kits[0].lld, min_z_min)
 
     await self._send_aspirate(kits, effective_lld, is_tadm, use_v2, lld_read_timeout)
 
@@ -1691,12 +1600,8 @@ class PrepPIPBackend(PIPBackend):
 
     lld_read_timeout = read_timeout
     if lld_read_timeout is None and effective_lld and kits:
-      kit0_lld = kits[0].lld
-      if kit0_lld.channel_speed > 0:
-        min_z_min = min(k.common.z_minimum for k in kits)
-        seek_distance = kit0_lld.search_start_position - min_z_min
-        if seek_distance > 0:
-          lld_read_timeout = seek_distance / kit0_lld.channel_speed + 5.0
+      min_z_min = min(k.common.z_minimum for k in kits)
+      lld_read_timeout = lld_seek_timeout(kits[0].lld, min_z_min)
 
     await self._send_dispense(kits, effective_lld, use_v2, lld_read_timeout)
 

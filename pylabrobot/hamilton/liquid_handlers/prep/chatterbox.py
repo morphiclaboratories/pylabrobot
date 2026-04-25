@@ -11,7 +11,7 @@ from pylabrobot.hamilton.tcp.introspection import HamiltonIntrospection, MethodI
 from pylabrobot.hamilton.tcp.packets import Address
 
 from . import prep_commands as PrepCmd
-from .driver import MLPREP_OBJECT_PATH, PIPETTOR_OBJECT_PATH, PrepDriver, PrepSetupParams
+from .driver import MLPREP_OBJECT_PATH, MPH_OBJECT_PATH, PIPETTOR_OBJECT_PATH, PrepDriver, PrepSetupParams
 from .info import PrepInstrumentInfo
 from .prep_commands import PrepCommand
 
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 # PrepPIPBackend._probe_v2_support expects pipettor interface 1 to expose these method IDs.
 _V2_PIPETTING_METHOD_IDS = frozenset(range(38, 44))
+# PrepMPHBackend._probe_v2_support expects MPH interface 1 to expose these method IDs.
+_V2_MPH_METHOD_IDS = frozenset(range(29, 35))
 
 
 class _PrepChatterboxIntrospection(HamiltonIntrospection):
@@ -31,16 +33,17 @@ class _PrepChatterboxIntrospection(HamiltonIntrospection):
     if not isinstance(client, PrepChatterboxDriver):
       return await super().methods_for_interface(address, interface_id)
     addr = await self._resolve_target_address(address)
-    if (
-      client._pipettor_addr is not None
-      and addr == client._pipettor_addr
-      and interface_id == 1
-      and not client._use_v1_aspirate_dispense
-    ):
-      return [
-        MethodInfo(interface_id=1, call_type=0, method_id=mid, name=f"v2_stub_{mid}")
-        for mid in sorted(_V2_PIPETTING_METHOD_IDS)
-      ]
+    if interface_id == 1 and not client._use_v1_aspirate_dispense:
+      if client._pipettor_addr is not None and addr == client._pipettor_addr:
+        return [
+          MethodInfo(interface_id=1, call_type=0, method_id=mid, name=f"v2_stub_{mid}")
+          for mid in sorted(_V2_PIPETTING_METHOD_IDS)
+        ]
+      if client._mph_addr is not None and addr == client._mph_addr:
+        return [
+          MethodInfo(interface_id=1, call_type=0, method_id=mid, name=f"v2_mph_stub_{mid}")
+          for mid in sorted(_V2_MPH_METHOD_IDS)
+        ]
     return await super().methods_for_interface(address, interface_id)
 
 
@@ -67,7 +70,7 @@ class PrepChatterboxDriver(PrepDriver):
   def __init__(
     self,
     num_channels: int = 2,
-    has_mph: bool = False,
+    has_mph: bool = True,
     default_traverse_height: float = 180.0,
   ):
     super().__init__(host="chatterbox", port=2000)
@@ -82,6 +85,7 @@ class PrepChatterboxDriver(PrepDriver):
       has_mph=has_mph,
     )
     self._pipettor_addr: Optional[Address] = None
+    self._mph_addr: Optional[Address] = None
     self._use_v1_aspirate_dispense: bool = False
 
   @property
@@ -116,9 +120,12 @@ class PrepChatterboxDriver(PrepDriver):
       )
     self._pipettor_addr = await self.resolve_path(PIPETTOR_OBJECT_PATH)
     self._mlprep_address = await self.resolve_path(MLPREP_OBJECT_PATH)
+    if self._canned_config.has_mph:
+      self._mph_addr = await self.resolve_path(MPH_OBJECT_PATH)
 
   async def stop(self):
     self._pipettor_addr = None
+    self._mph_addr = None
     self._mlprep_address = None
     self._invalidate_introspection_session()
 

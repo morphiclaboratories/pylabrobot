@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional, Tuple
 
 from pylabrobot.capabilities.capability import BackendParams
+from pylabrobot.capabilities.liquid_handling.head8 import Head8
 from pylabrobot.capabilities.liquid_handling.pip import PIP
 from pylabrobot.device import Device
 from pylabrobot.resources.deck import Deck
@@ -20,6 +21,7 @@ from .core import PrepCoreGripper, PrepCoreGripperFactory, PrepGripperArm
 from .driver import PrepDriver, PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
+from .mph_backend import PrepMPHBackend
 from .pip_backend import PrepPIPBackend
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,7 @@ class Prep(Device):
     self.info = PrepChatterboxInstrumentInfo(driver) if chatterbox else PrepInstrumentInfo(driver)
     self._core_gripper_arm: Optional[PrepGripperArm] = None
     self.pip: Optional[PIP] = None
+    self.head8: Optional[Head8] = None
     self.method: Optional[PrepMethodLifecycle] = None
     self.calibration: Optional[PrepCalibration] = None
     self._core_factory: Optional[PrepCoreGripperFactory] = None
@@ -86,9 +89,28 @@ class Prep(Device):
       pip_backend.channels = await build_prep_channels(self.driver, self.info)
       self.pip = PIP(backend=pip_backend)
       await self.pip._on_setup()
+
+      if pip_backend.has_mph:
+        mph_backend = PrepMPHBackend(
+          driver=self.driver,
+          info=self.info,
+          default_traverse_height=params.default_traverse_height,
+          use_v1_aspirate_dispense=params.use_v1_aspirate_dispense,
+        )
+        mph_backend.channels = await build_prep_channels(
+          self.driver, self.info, root_name="MPH Channel Root", num_channels=8
+        )
+        mph_trash = (
+          self.deck.get_resource("waste_mph")
+          if self.deck is not None and self.deck.has_resource("waste_mph")
+          else None
+        )
+        self.head8 = Head8(backend=mph_backend, deck=self.deck, default_trash=mph_trash)
+        await self.head8._on_setup()
+
       self._core_factory = PrepCoreGripperFactory(driver=self.driver)
 
-      self._capabilities = [self.pip]
+      self._capabilities = [self.pip] + ([self.head8] if self.head8 is not None else [])
       self._setup_finished = True
     except Exception:
       await self.info._on_stop()
@@ -135,10 +157,13 @@ class Prep(Device):
       self._core_gripper_arm = None
     if self.pip is not None:
       await self.pip._on_stop()
+    if self.head8 is not None:
+      await self.head8._on_stop()
     await self.driver.stop()
     await self.info._on_stop()
     self._capabilities = []
     self.pip = None
+    self.head8 = None
     self.method = None
     self.calibration = None
     self._core_factory = None

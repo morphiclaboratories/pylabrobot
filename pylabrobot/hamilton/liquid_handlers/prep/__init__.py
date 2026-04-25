@@ -19,6 +19,7 @@ from .core import (
 from .driver import PrepDriver, PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
+from .mph_backend import PrepMPHBackend, PrepMPHDropTipsParams, PrepMPHPickUpTipsParams
 from .pip_backend import (
   PrepPIPAspirateParams,
   PrepPIPBackend,
@@ -41,6 +42,9 @@ __all__ = [
   "PrepDriver",
   "PrepGripperArm",
   "PrepInstrumentInfo",
+  "PrepMPHBackend",
+  "PrepMPHDropTipsParams",
+  "PrepMPHPickUpTipsParams",
   "PrepMethodLifecycle",
   "PrepPIPAspirateParams",
   "PrepPIPBackend",

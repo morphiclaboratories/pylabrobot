@@ -1498,6 +1498,133 @@ class MphDropTips(PrepCommand):
 
 
 @dataclass
+class MphAspirateNoLldMonitoring(PrepCommand):
+  """Aspirate without LLD via MPH coordinator (cmd=1, dest=MphRoot.MPH).
+
+  One AspirateParametersNoLldAndMonitoring struct per active probe — each with
+  its own explicit x/y position. ``channel`` is ChannelIndex.MPHChannel for all
+  entries. The array length equals the number of active probes (not necessarily 8).
+  """
+
+  command_id = 1
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersNoLldAndMonitoring], StructArray()]
+
+
+@dataclass
+class MphDispenseNoLld(PrepCommand):
+  """Dispense without LLD via MPH coordinator (cmd=5, dest=MphRoot.MPH).
+
+  One DispenseParametersNoLld struct per active probe — each with its own
+  explicit x/y position. ``channel`` is ChannelIndex.MPHChannel for all entries.
+  """
+
+  command_id = 5
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  dispense_parameters: Annotated[list[DispenseParametersNoLld], StructArray()]
+
+
+@dataclass
+class MphAspirateNoLldMonitoring2(PrepCommand):
+  """Aspirate V2 with liquid-following via MPH coordinator (cmd=29, dest=MphRoot.MPH).
+
+  Uses ``AspirateParametersNoLldAndMonitoring2`` which includes a
+  ``ContainerDescription`` frustum-segment array for Z-axis liquid-following.
+  One entry per active probe; array length equals the number of active probes.
+  """
+
+  command_id = 29
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersNoLldAndMonitoring2], StructArray()]
+
+
+@dataclass
+class MphDispenseNoLld2(PrepCommand):
+  """Dispense V2 without LLD via MPH coordinator (cmd=33, dest=MphRoot.MPH).
+
+  Uses ``DispenseParametersNoLld2`` which includes a ``ContainerDescription``
+  frustum-segment array for Z-axis liquid-following.
+  One entry per active probe; array length equals the number of active probes.
+  """
+
+  command_id = 33
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  dispense_parameters: Annotated[list[DispenseParametersNoLld2], StructArray()]
+
+
+@dataclass
+class MphAspirateTadm(PrepCommand):
+  """Aspirate with TADM, no LLD via MPH coordinator (cmd=2, dest=MphRoot.MPH)."""
+
+  command_id = 2
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersNoLldAndTadm], StructArray()]
+
+
+@dataclass
+class MphAspirateWithLld(PrepCommand):
+  """Aspirate with LLD and monitoring via MPH coordinator (cmd=3, dest=MphRoot.MPH)."""
+
+  command_id = 3
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersLldAndMonitoring], StructArray()]
+
+
+@dataclass
+class MphAspirateWithLldTadm(PrepCommand):
+  """Aspirate with LLD and TADM via MPH coordinator (cmd=4, dest=MphRoot.MPH)."""
+
+  command_id = 4
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersLldAndTadm], StructArray()]
+
+
+@dataclass
+class MphDispenseWithLld(PrepCommand):
+  """Dispense with LLD via MPH coordinator (cmd=6, dest=MphRoot.MPH)."""
+
+  command_id = 6
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  dispense_parameters: Annotated[list[DispenseParametersLld], StructArray()]
+
+
+@dataclass
+class MphAspirateTadm2(PrepCommand):
+  """Aspirate V2 with TADM, no LLD via MPH coordinator (cmd=30, dest=MphRoot.MPH)."""
+
+  command_id = 30
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersNoLldAndTadm2], StructArray()]
+
+
+@dataclass
+class MphAspirateWithLld2(PrepCommand):
+  """Aspirate V2 with LLD and monitoring via MPH coordinator (cmd=31, dest=MphRoot.MPH)."""
+
+  command_id = 31
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersLldAndMonitoring2], StructArray()]
+
+
+@dataclass
+class MphAspirateWithLldTadm2(PrepCommand):
+  """Aspirate V2 with LLD and TADM via MPH coordinator (cmd=32, dest=MphRoot.MPH)."""
+
+  command_id = 32
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  aspirate_parameters: Annotated[list[AspirateParametersLldAndTadm2], StructArray()]
+
+
+@dataclass
+class MphDispenseWithLld2(PrepCommand):
+  """Dispense V2 with LLD via MPH coordinator (cmd=34, dest=MphRoot.MPH)."""
+
+  command_id = 34
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  dispense_parameters: Annotated[list[DispenseParametersLld2], StructArray()]
+
+
+@dataclass
 class PrepPickUpToolById(PrepCommand):
   """Pick up tool by tip-definition ID (cmd=14, dest=Pipettor)."""
 
