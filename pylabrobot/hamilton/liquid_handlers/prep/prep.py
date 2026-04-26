@@ -87,7 +87,12 @@ class Prep(Device):
         use_v1_aspirate_dispense=params.use_v1_aspirate_dispense,
       )
       pip_backend.channels = await build_prep_channels(self.driver, self.info)
-      self.pip = PIP(backend=pip_backend)
+      pip_trash = (
+        self.deck.get_trash_area()
+        if self.deck is not None and self.deck.has_resource("trash")
+        else None
+      )
+      self.pip = PIP(backend=pip_backend, deck=self.deck, default_trash=pip_trash)
       await self.pip._on_setup()
 
       if pip_backend.has_mph:
