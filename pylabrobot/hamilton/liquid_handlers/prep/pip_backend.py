@@ -367,8 +367,6 @@ def _build_container_segments(resource) -> list[PrepCmd.SegmentDescriptor]:
   ]
 
 
-
-
 class _WellGeometry(NamedTuple):
   """Absolute Z positions derived from well geometry."""
 
@@ -497,10 +495,6 @@ class PrepPIPBackend(PIPBackend):
   :meth:`Prep.setup` before :meth:`_on_setup`.
   """
 
-  # Re-export the module-level LLDMode so existing code using
-  # PrepPIPBackend.LLDMode continues to work unchanged.
-  LLDMode = LLDMode
-
   # V2 aspirate/dispense command IDs (interface 1 on Pipettor).
   _V2_PIPETTING_CMD_IDS = {38, 39, 40, 41, 42, 43}
 
@@ -596,7 +590,8 @@ class PrepPIPBackend(PIPBackend):
     else:
       try:
         supported = await self._probe_v2_support()
-      except Exception:
+      except Exception as e:
+        logger.warning("PIP V2 support probe failed: %s", e)
         supported = False
       if not supported:
         raise RuntimeError(
@@ -860,12 +855,12 @@ class PrepPIPBackend(PIPBackend):
         raise ValueError(f"lld_mode length must match len(ops): {len(lld_mode)} != {n}")
       if allowed_modes is not None:
         for m in lld_mode:
-          if m != self.LLDMode.OFF and m not in allowed_modes:
+          if m != LLDMode.OFF and m not in allowed_modes:
             raise ValueError(
               f"Dispense does not support {m.name} LLD — only CAPACITIVE or OFF. "
               "Pressure-based LLD requires aspiration (plunger movement)."
             )
-      lld_on = [m != self.LLDMode.OFF for m in lld_mode]
+      lld_on = [m != LLDMode.OFF for m in lld_mode]
       if any(lld_on) and not all(lld_on):
         raise ValueError(
           "Prep firmware requires all channels to use the same LLD mode category. "
@@ -938,7 +933,9 @@ class PrepPIPBackend(PIPBackend):
 
     volumes = corrected_volumes_for_ops(ops, hlcs, dvc)
 
-    well_geometry = [_absolute_z_from_well(op.resource, op.liquid_height, op.offset.z) for op in ops]
+    well_geometry = [
+      _absolute_z_from_well(op.resource, op.liquid_height, op.offset.z) for op in ops
+    ]
     raw_traverse = self._resolve_traverse_height(None)
     z_minimum = fill_in_defaults(z_minimum, [g.well_bottom for g in well_geometry])
     z_fluid = fill_in_defaults(z_fluid, [g.liquid_surface for g in well_geometry])
@@ -1457,7 +1454,7 @@ class PrepPIPBackend(PIPBackend):
     Example::
 
       await backend.aspirate(ops, [0], z_final=[95.0], settling_time=[2.0])
-      await backend.aspirate(ops, [0], lld_mode=[PrepPIPBackend.LLDMode.CAPACITIVE])
+      await backend.aspirate(ops, [0], lld_mode=[LLDMode.CAPACITIVE])
       await backend.aspirate(ops, [0], tadm=PrepCmd.TadmParameters.default())
       await backend.aspirate(ops, [0], command_version="v1")
     """
@@ -1542,7 +1539,7 @@ class PrepPIPBackend(PIPBackend):
     Example::
 
       await backend.dispense(ops, [0], z_final=[95.0], settling_time=[0.5])
-      await backend.dispense(ops, [0], lld_mode=[PrepPIPBackend.LLDMode.CAPACITIVE])
+      await backend.dispense(ops, [0], lld_mode=[LLDMode.CAPACITIVE])
       await backend.dispense(ops, [0], command_version="v1")
     """
     p = (
@@ -1570,7 +1567,7 @@ class PrepPIPBackend(PIPBackend):
     read_timeout = p.read_timeout
     command_version = p.command_version
 
-    _DISPENSE_ALLOWED_LLD = frozenset({self.LLDMode.CAPACITIVE})
+    _DISPENSE_ALLOWED_LLD = frozenset({LLDMode.CAPACITIVE})
     effective_lld = self._resolve_effective_lld(
       lld_mode, lld, len(ops), allowed_modes=_DISPENSE_ALLOWED_LLD
     )

@@ -135,26 +135,23 @@ class PrepMPHBackend(Head8Backend):
   grip force.
   """
 
-  # Re-export LLDMode so callers can use PrepMPHBackend.LLDMode.
-  LLDMode = LLDMode
-
   # Command dispatch tables: (effective_lld, is_tadm, use_v2) → command class
   _ASPIRATE_CMD = {
-    (True,  True,  True):  PrepCmd.MphAspirateWithLldTadm2,
-    (True,  True,  False): PrepCmd.MphAspirateWithLldTadm,
-    (True,  False, True):  PrepCmd.MphAspirateWithLld2,
-    (True,  False, False): PrepCmd.MphAspirateWithLld,
-    (False, True,  True):  PrepCmd.MphAspirateTadm2,
-    (False, True,  False): PrepCmd.MphAspirateTadm,
-    (False, False, True):  PrepCmd.MphAspirateNoLldMonitoring2,
+    (True, True, True): PrepCmd.MphAspirateWithLldTadm2,
+    (True, True, False): PrepCmd.MphAspirateWithLldTadm,
+    (True, False, True): PrepCmd.MphAspirateWithLld2,
+    (True, False, False): PrepCmd.MphAspirateWithLld,
+    (False, True, True): PrepCmd.MphAspirateTadm2,
+    (False, True, False): PrepCmd.MphAspirateTadm,
+    (False, False, True): PrepCmd.MphAspirateNoLldMonitoring2,
     (False, False, False): PrepCmd.MphAspirateNoLldMonitoring,
   }
 
   # Command dispatch tables: (effective_lld, use_v2) → command class
   _DISPENSE_CMD = {
-    (True,  True):  PrepCmd.MphDispenseWithLld2,
-    (True,  False): PrepCmd.MphDispenseWithLld,
-    (False, True):  PrepCmd.MphDispenseNoLld2,
+    (True, True): PrepCmd.MphDispenseWithLld2,
+    (True, False): PrepCmd.MphDispenseWithLld,
+    (False, True): PrepCmd.MphDispenseNoLld2,
     (False, False): PrepCmd.MphDispenseNoLld,
   }
 
@@ -191,7 +188,8 @@ class PrepMPHBackend(Head8Backend):
     else:
       try:
         supported = await self._probe_v2_support()
-      except Exception:
+      except Exception as e:
+        logger.warning("MPH V2 support probe failed: %s", e)
         supported = False
       if not supported:
         raise RuntimeError(
@@ -224,10 +222,10 @@ class PrepMPHBackend(Head8Backend):
       return final_z
     if self._default_traverse_height is not None:
       return self._default_traverse_height
-    try:
-      return float(self._info.config.default_traverse_height)
-    except Exception as e:
-      raise RuntimeError("No traverse height available; set default_traverse_height") from e
+    val = self._info.config.default_traverse_height
+    if val is None:
+      raise RuntimeError("No traverse height available; set default_traverse_height")
+    return val
 
   def _resolve_probe_positions(self, wells) -> List[float]:
     """Compute expected probe Y positions and validate actual well Ys match.
@@ -793,17 +791,22 @@ class PrepMPHBackend(Head8Backend):
     self._require_all_channels(use_channels, "aspirate8")
     tip = next((t for t in aspiration.tips if t is not None), None)
     traverse_z = self._resolve_traverse_height()
-    final_z = p.z_final if p.z_final is not None else (
-      traverse_z - (tip.total_tip_length - tip.fitting_depth) if tip is not None else traverse_z
+    final_z = (
+      p.z_final
+      if p.z_final is not None
+      else (
+        traverse_z - (tip.total_tip_length - tip.fitting_depth) if tip is not None else traverse_z
+      )
     )
 
+    op_targets: Union[str, List[str]]
     if isinstance(aspiration, Head8AspirationContainer):
       container = aspiration.container
       self._validate_container_span(container)
       resource_name = container.parent.name if container.parent is not None else container.name
       op_targets = container.name
       loc = container.get_absolute_location("c", "c", "cavity_bottom")
-      ref_x, ref_y = loc.x, loc.y
+      ref_x, ref_y = loc.x, loc.y + 3.5 * PROBE_PITCH_MM
       wg = _absolute_z_from_well(container, aspiration.liquid_height)
       ref_segments = p.container_segments or (
         _build_container_segments(container) if p.auto_container_geometry else []
@@ -825,7 +828,9 @@ class PrepMPHBackend(Head8Backend):
     z_fluid = p.z_fluid if p.z_fluid is not None else wg.liquid_surface
     z_air = p.z_air if p.z_air is not None else wg.z_air
     z_minimum = p.z_minimum if p.z_minimum is not None else wg.well_bottom
-    z_bottom_search_offset = p.z_bottom_search_offset if p.z_bottom_search_offset is not None else 2.0
+    z_bottom_search_offset = (
+      p.z_bottom_search_offset if p.z_bottom_search_offset is not None else 2.0
+    )
     settling_time = p.settling_time if p.settling_time is not None else 1.0
     transport_air_volume = p.transport_air_volume if p.transport_air_volume is not None else 0.0
     z_liquid_exit_speed = p.z_liquid_exit_speed if p.z_liquid_exit_speed is not None else 10.0
@@ -899,17 +904,22 @@ class PrepMPHBackend(Head8Backend):
     self._require_all_channels(use_channels, "dispense8")
     tip = next((t for t in dispense.tips if t is not None), None)
     traverse_z = self._resolve_traverse_height()
-    final_z = p.z_final if p.z_final is not None else (
-      traverse_z - (tip.total_tip_length - tip.fitting_depth) if tip is not None else traverse_z
+    final_z = (
+      p.z_final
+      if p.z_final is not None
+      else (
+        traverse_z - (tip.total_tip_length - tip.fitting_depth) if tip is not None else traverse_z
+      )
     )
 
+    op_targets: Union[str, List[str]]
     if isinstance(dispense, Head8DispenseContainer):
       container = dispense.container
       self._validate_container_span(container)
       resource_name = container.parent.name if container.parent is not None else container.name
       op_targets = container.name
       loc = container.get_absolute_location("c", "c", "cavity_bottom")
-      ref_x, ref_y = loc.x, loc.y
+      ref_x, ref_y = loc.x, loc.y + 3.5 * PROBE_PITCH_MM
       wg = _absolute_z_from_well(container, dispense.liquid_height)
       ref_segments = p.container_segments or (
         _build_container_segments(container) if p.auto_container_geometry else []
@@ -931,7 +941,9 @@ class PrepMPHBackend(Head8Backend):
     z_fluid = p.z_fluid if p.z_fluid is not None else wg.liquid_surface
     z_air = p.z_air if p.z_air is not None else wg.z_air
     z_minimum = p.z_minimum if p.z_minimum is not None else wg.well_bottom
-    z_bottom_search_offset = p.z_bottom_search_offset if p.z_bottom_search_offset is not None else 2.0
+    z_bottom_search_offset = (
+      p.z_bottom_search_offset if p.z_bottom_search_offset is not None else 2.0
+    )
     settling_time = p.settling_time if p.settling_time is not None else 0.0
     transport_air_volume = p.transport_air_volume if p.transport_air_volume is not None else 0.0
     z_liquid_exit_speed = p.z_liquid_exit_speed if p.z_liquid_exit_speed is not None else 10.0
