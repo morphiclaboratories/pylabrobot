@@ -19,15 +19,11 @@ class Head8Backend(CapabilityBackend, metaclass=ABCMeta):
   """Backend for 8MPH ganged-head liquid handling operations."""
 
   @abstractmethod
-  async def pick_up_tips8(
-    self, op: Head8TipPickup, backend_params: Optional[BackendParams] = None
-  ):
+  async def pick_up_tips8(self, op: Head8TipPickup, backend_params: Optional[BackendParams] = None):
     """Pick up tips using the 8MPH head."""
 
   @abstractmethod
-  async def drop_tips8(
-    self, op: Head8TipDrop, backend_params: Optional[BackendParams] = None
-  ):
+  async def drop_tips8(self, op: Head8TipDrop, backend_params: Optional[BackendParams] = None):
     """Drop tips using the 8MPH head."""
 
   @abstractmethod

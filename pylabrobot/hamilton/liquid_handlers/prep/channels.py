@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import struct as _struct
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, TypedDict
 
 from pylabrobot.hamilton.tcp.packets import Address
 
@@ -177,7 +177,18 @@ async def discover_channel_drives(
 # ---------------------------------------------------------------------------
 
 
-async def request_channel_bounds(driver: "PrepDriver") -> List[dict]:
+class PrepChannelBounds(TypedDict):
+  """Firmware-reported movement limits for one pipettor channel (mm)."""
+
+  x_min: float
+  x_max: float
+  y_min: float
+  y_max: float
+  z_min: float
+  z_max: float
+
+
+async def request_channel_bounds(driver: "PrepDriver") -> List[PrepChannelBounds]:
   """Request per-channel movement bounds from the firmware (cmd=10).
 
   Returns one dict per channel (keys ``x_min``, ``x_max``, ``y_min``, ``y_max``,
@@ -204,7 +215,7 @@ async def request_channel_bounds(driver: "PrepDriver") -> List[dict]:
   # x_min, x_max, y_min, y_max, z_min, z_max
   data = raw[0]
   _CHANNEL_ENUM_TO_IDX = {v: k for k, v in _CHANNEL_INDEX.items()}
-  indexed: list = []
+  indexed: list[tuple[int, PrepChannelBounds]] = []
 
   i = 0
   while i < len(data) - 20:
@@ -222,19 +233,15 @@ async def request_channel_bounds(driver: "PrepDriver") -> List[dict]:
           j += 1
 
       if ch_idx is not None and len(floats) == 6:
-        indexed.append(
-          (
-            ch_idx,
-            {
-              "x_min": floats[0],
-              "x_max": floats[1],
-              "y_min": floats[2],
-              "y_max": floats[3],
-              "z_min": floats[4],
-              "z_max": floats[5],
-            },
-          )
-        )
+        bounds: PrepChannelBounds = {
+          "x_min": floats[0],
+          "x_max": floats[1],
+          "y_min": floats[2],
+          "y_max": floats[3],
+          "z_min": floats[4],
+          "z_max": floats[5],
+        }
+        indexed.append((ch_idx, bounds))
       i = j
     else:
       i += 1
@@ -263,14 +270,14 @@ class PrepPIPChannel:
     sleeve_sensor: Optional[Address] = None,
     zdrive: Optional[Address] = None,
     node_info: Optional[Address] = None,
-    bounds: Optional[dict] = None,
+    bounds: Optional[PrepChannelBounds] = None,
   ) -> None:
     self.index = index
     self._driver = driver
     self.sleeve_sensor = sleeve_sensor
     self.zdrive = zdrive
     self.node_info = node_info
-    self.bounds = bounds  # dict with x_min..z_max, or None if unavailable
+    self.bounds = bounds  # x_min..z_max from firmware, or None if unavailable
 
   def __repr__(self) -> str:
     return (
@@ -346,6 +353,7 @@ async def build_prep_channels(
 
 __all__ = [
   "ChannelDriveMap",
+  "PrepChannelBounds",
   "PrepPIPChannel",
   "build_prep_channels",
   "discover_channel_drives",

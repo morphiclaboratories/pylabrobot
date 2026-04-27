@@ -364,7 +364,9 @@ def test_pick_up_tips_default_pre_position_sends_mph_move_then_pickup():
 
     await p.head8.pick_up_tips(tip_spots=tip_rack.column(0), use_channels=list(range(8)))
 
-    mph_seq = [c for c in captured if isinstance(c, (PrepCmd.MphMoveToPosition, PrepCmd.MphPickupTips))]
+    mph_seq = [
+      c for c in captured if isinstance(c, (PrepCmd.MphMoveToPosition, PrepCmd.MphPickupTips))
+    ]
     assert len(mph_seq) >= 2
     assert isinstance(mph_seq[0], PrepCmd.MphMoveToPosition)
     assert isinstance(mph_seq[1], PrepCmd.MphPickupTips)

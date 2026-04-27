@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple, cast
+from typing import Any, Dict, Optional, Tuple
 
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.hamilton.tcp.client import HamiltonTCPClient
@@ -176,7 +176,10 @@ class PrepDriver(HamiltonTCPClient):
     if not roots:
       raise RuntimeError("No root objects discovered. Call setup() first.")
     info = await self.introspection.get_object(roots[0])
-    return info.name
+    name = info.name
+    if not isinstance(name, str):
+      raise RuntimeError(f"Unexpected root name type: {type(name).__name__}")
+    return name
 
   # ---------------------------------------------------------------------------
   # Firmware string queries (transport: raw HOI decode + status query)
@@ -201,15 +204,17 @@ class PrepDriver(HamiltonTCPClient):
     self, addr: Address, cmd_id: int, iface_id: int = 3
   ) -> Optional[str]:
     """Send a status query and decode the string response."""
-    Cmd = type(
-      "_FWQuery",
-      (PrepCmd.PrepStatusRequest,),
-      cast(
-        dict[str, Any],
-        {"command_id": cmd_id, "interface_id": iface_id, "__annotations__": {"dest": Address}},
-      ),
-    )
-    raw: Optional[tuple] = await self.send_command(
+    ns: dict[str, Any] = {
+      "command_id": cmd_id,
+      "interface_id": iface_id,
+      "__annotations__": {"dest": Address},
+    }
+    Cmd = type("_FWQuery", (PrepCmd.PrepStatusRequest,), ns)
+    raw_resp: object = await self.send_command(
       Cmd(dest=addr), return_raw=True, raise_on_error=False
     )
-    return self._decode_firmware_string(raw)
+    if raw_resp is None:
+      return self._decode_firmware_string(None)
+    if not isinstance(raw_resp, tuple):
+      return None
+    return self._decode_firmware_string(raw_resp)

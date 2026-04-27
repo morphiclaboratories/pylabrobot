@@ -1,8 +1,8 @@
 """Capability for 8-head (8MPH) ganged liquid handling."""
 
 import logging
-from collections import Counter
-from typing import Dict, List, Optional, Union
+from collections import defaultdict
+from typing import DefaultDict, Dict, List, Optional, Union
 
 from pylabrobot.capabilities.capability import BackendParams, Capability, need_capability_ready
 from pylabrobot.resources import (
@@ -67,7 +67,10 @@ class Head8(Capability):
 
   def has_tip(self, channel: int) -> bool:
     """Return True if the given channel (0-indexed) currently holds a tip."""
-    return self._tip_trackers[channel].has_tip
+    # getattr: under ``mypy --follow-imports=skip``, :class:`TipTracker` is ``Any``;
+    # ``x is not None`` is still ``bool`` when ``x`` is ``Any``.
+    pending = getattr(self._tip_trackers[channel], "_pending_tip", None)
+    return pending is not None
 
   def get_mounted_tips(self) -> List[Optional[Tip]]:
     """Return tips for all 8 channels; None where no tip is mounted."""
@@ -300,7 +303,9 @@ class Head8(Capability):
       elif self.deck is not None:
         trash = self.deck.get_trash_area96()
       else:
-        raise ValueError("No trash provided and no deck or default_trash set on Head8. Pass trash explicitly.")
+        raise ValueError(
+          "No trash provided and no deck or default_trash set on Head8. Pass trash explicitly."
+        )
 
     use_channels = self._resolve_use_channels(use_channels)
     active = [ch for ch in use_channels if self._tip_trackers[ch].has_tip]
@@ -387,7 +392,7 @@ class Head8(Capability):
       active_tips = [tips[ch] for ch in use_channels]
 
       # per-well total volume (duplicate well entries → multiple probes in same well)
-      well_vol: Counter = Counter()
+      well_vol: DefaultDict[int, float] = defaultdict(float)
       for w in wells:
         well_vol[id(w)] += volume
 
@@ -482,9 +487,7 @@ class Head8(Capability):
         elif tip.tracker.get_used_volume() <= volume:
           tip.tracker.remove_liquid(volume=min(tip.tracker.get_used_volume(), volume))
       if not container.tracker.is_disabled and does_volume_tracking():
-        container.tracker.add_liquid(
-          volume=len([t for t in active_tips if t is not None]) * volume
-        )
+        container.tracker.add_liquid(volume=len([t for t in active_tips if t is not None]) * volume)
 
       dispense_op = Head8DispenseContainer(
         container=container,
@@ -509,7 +512,7 @@ class Head8(Capability):
 
       active_tips = [tips[ch] for ch in use_channels]
 
-      well_vol: Counter = Counter()
+      well_vol: DefaultDict[int, float] = defaultdict(float)
       for w in wells:
         well_vol[id(w)] += volume
 

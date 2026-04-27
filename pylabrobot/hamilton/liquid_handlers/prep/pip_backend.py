@@ -58,6 +58,7 @@ from . import prep_commands as PrepCmd
 from .driver import PIPETTOR_OBJECT_PATH
 from .channels import (
   ChannelDriveMap,
+  PrepChannelBounds,
   PrepPIPChannel,
   discover_channel_drives,
   request_channel_bounds,
@@ -231,9 +232,10 @@ def lld_seek_timeout(
 ) -> Optional[float]:
   """Compute a read timeout (s) for an LLD seek move, or None if not applicable."""
   if lld_params.channel_speed > 0:
-    seek_distance = lld_params.search_start_position - z_minimum
+    speed: float = float(lld_params.channel_speed)
+    seek_distance: float = float(lld_params.search_start_position) - z_minimum
     if seek_distance > 0:
-      return seek_distance / lld_params.channel_speed + 5.0
+      return seek_distance / speed + 5.0
   return None
 
 
@@ -320,7 +322,7 @@ def _effective_radius(resource) -> float:
   return float(resource.get_size_x() / 2)
 
 
-def _build_container_segments(resource) -> list[PrepCmd.SegmentDescriptor]:
+def _build_container_segments(resource: object) -> list[PrepCmd.SegmentDescriptor]:
   """Derive PrepCmd.SegmentDescriptor list from a Well's geometry for liquid-following.
 
   Each segment is a frustum.  The firmware uses area_bottom/area_top to
@@ -332,17 +334,18 @@ def _build_container_segments(resource) -> list[PrepCmd.SegmentDescriptor]:
   """
   if not isinstance(resource, Well):
     return []
+  well: Well = resource
 
-  size_z = resource.get_size_z()
+  size_z = well.get_size_z()
 
-  if resource.cross_section_type == CrossSectionType.CIRCLE:
-    area = math.pi * (resource.get_size_x() / 2) ** 2
-  elif resource.cross_section_type == CrossSectionType.RECTANGLE:
-    area = resource.get_size_x() * resource.get_size_y()
+  if well.cross_section_type == CrossSectionType.CIRCLE:
+    area = math.pi * (well.get_size_x() / 2) ** 2
+  elif well.cross_section_type == CrossSectionType.RECTANGLE:
+    area = well.get_size_x() * well.get_size_y()
   else:
     return []
 
-  if resource.supports_compute_height_volume_functions():
+  if well.supports_compute_height_volume_functions():
     # Non-linear geometry: approximate with N frustum segments by sampling dV/dh.
     n_boundaries = 11  # 10 segments
     heights = [size_z * i / (n_boundaries - 1) for i in range(n_boundaries)]
@@ -351,8 +354,8 @@ def _build_container_segments(resource) -> list[PrepCmd.SegmentDescriptor]:
     def area_at(h: float) -> float:
       h_lo = max(0.0, h - eps)
       h_hi = min(size_z, h + eps)
-      dv = resource.compute_volume_from_height(h_hi) - resource.compute_volume_from_height(h_lo)
-      return dv / (h_hi - h_lo)
+      dv = well.compute_volume_from_height(h_hi) - well.compute_volume_from_height(h_lo)
+      return float(dv / (h_hi - h_lo))
 
     return [
       PrepCmd.SegmentDescriptor(
@@ -548,7 +551,7 @@ class PrepPIPBackend(PIPBackend):
     self._info = info
     self.deck = deck
     self._user_traverse_height: Optional[float] = default_traverse_height
-    self._channel_bounds: list[dict] = []
+    self._channel_bounds: list[PrepChannelBounds] = []
     self._use_v1_aspirate_dispense: bool = use_v1_aspirate_dispense
     self._supports_v2_pipetting: Optional[bool] = None
     self.setup_finished: bool = False
@@ -658,7 +661,7 @@ class PrepPIPBackend(PIPBackend):
   @property
   def num_channels(self) -> int:
     """Number of independent dual-channel pipettor channels (1 or 2). Read from info.config."""
-    n = self._info.config.num_channels
+    n: Optional[int] = self._info.config.num_channels
     if n is None:
       raise RuntimeError("Instrument config has no num_channels (finish Prep.setup first).")
     return n
@@ -697,9 +700,11 @@ class PrepPIPBackend(PIPBackend):
     try:
       cfg = self._info.config
     except RuntimeError:
-      cfg = None
-    if cfg is not None and cfg.default_traverse_height is not None:
-      return cfg.default_traverse_height
+      height: Optional[float] = None
+    else:
+      height = cfg.default_traverse_height
+    if height is not None:
+      return height
     raise RuntimeError(
       "Default traverse height is required for this operation but could not be determined. "
       "Either pass final_z explicitly to this call, or set it via "
@@ -769,9 +774,7 @@ class PrepPIPBackend(PIPBackend):
     )
 
     if p.pre_position:
-      traverse_h = (
-        p.minimum_traverse_height_at_beginning_of_a_command or resolved_final_z
-      )
+      traverse_h = p.minimum_traverse_height_at_beginning_of_a_command or resolved_final_z
       locs = [indexed_ops[ch].resource.get_absolute_location("c", "c", "t") for ch in use_channels]
       await self.move_to_position(
         x=locs[0].x,
@@ -1683,7 +1686,7 @@ class PrepPIPBackend(PIPBackend):
   # Channel position queries
   # ---------------------------------------------------------------------------
 
-  async def request_channel_bounds(self) -> list[dict]:
+  async def request_channel_bounds(self) -> list[PrepChannelBounds]:
     """Per-channel movement bounds (PipettorService.GetChannelBounds).
 
     Thin delegation to :func:`~pylabrobot.hamilton.liquid_handlers.prep.channels.request_channel_bounds`.
@@ -1704,12 +1707,17 @@ class PrepPIPBackend(PIPBackend):
     Returns:
       List of Coordinate, one per channel.
     """
-    resp = await self._driver.send_command(PrepCmd.PrepGetPositions(), raise_on_error=False)
-    if resp is None or not resp.positions:
+    resp_obj: object = await self._driver.send_command(PrepCmd.PrepGetPositions(), raise_on_error=False)
+    if resp_obj is None:
+      return []
+    if not isinstance(resp_obj, PrepCmd.PrepGetPositions.Response):
+      return []
+    resp = resp_obj
+    if not resp.positions:
       return []
 
     _CHANNEL_ENUM_TO_IDX = {v: k for k, v in _CHANNEL_INDEX.items()}
-    indexed = []
+    indexed: list[tuple[int, Coordinate]] = []
     for p in resp.positions:
       ch_idx = _CHANNEL_ENUM_TO_IDX.get(p.channel)
       if ch_idx is not None:
@@ -1732,7 +1740,7 @@ class PrepPIPBackend(PIPBackend):
     positions = await self.request_channel_positions()
     if channel_idx >= len(positions):
       raise ValueError(f"Channel {channel_idx} out of range ({len(positions)} channels).")
-    return positions[channel_idx].x
+    return float(positions[channel_idx].x)
 
   async def request_y_pos_channel_n(self, channel_idx: int) -> float:
     """Request Y position of pipettor channel n (in mm).
@@ -1748,7 +1756,7 @@ class PrepPIPBackend(PIPBackend):
     positions = await self.request_channel_positions()
     if channel_idx >= len(positions):
       raise ValueError(f"Channel {channel_idx} out of range ({len(positions)} channels).")
-    return positions[channel_idx].y
+    return float(positions[channel_idx].y)
 
   async def request_z_pos_channel_n(self, channel_idx: int) -> float:
     """Request Z position of pipettor channel n (in mm).
@@ -1764,7 +1772,7 @@ class PrepPIPBackend(PIPBackend):
     positions = await self.request_channel_positions()
     if channel_idx >= len(positions):
       raise ValueError(f"Channel {channel_idx} out of range ({len(positions)} channels).")
-    return positions[channel_idx].z
+    return float(positions[channel_idx].z)
 
   async def get_channels_y_positions(self) -> dict[int, float]:
     """Request Y positions of all channels.

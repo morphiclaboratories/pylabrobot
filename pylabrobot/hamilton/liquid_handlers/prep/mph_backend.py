@@ -225,10 +225,10 @@ class PrepMPHBackend(Head8Backend):
       return final_z
     if self._user_traverse_height is not None:
       return self._user_traverse_height
-    val = self._info.config.default_traverse_height
-    if val is None:
+    height: Optional[float] = self._info.config.default_traverse_height
+    if height is None:
       raise RuntimeError("No traverse height available; set default_traverse_height")
-    return val
+    return height
 
   def _resolve_probe_positions(self, wells) -> List[float]:
     """Compute expected probe Y positions and validate actual well Ys match.
