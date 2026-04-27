@@ -1461,14 +1461,14 @@ class MphPickupTips(PrepCommand):
                dispenserVolume: f32, dispenserSpeed: f32,
                tipMask: u32) -> { seekSpeed: List[u16] }
 
-  The MPH takes a SINGLE struct (type_57) for tip_parameters, not a
+  The MPH takes a SINGLE struct (type_57) for tip_position, not a
   StructArray (type_61) like the Pipettor. All 8 probes move as one unit;
   tip_mask selects which channels engage.
   """
 
   command_id = 9
   firmware_path = "MLPrepRoot.MphRoot.MPH"
-  tip_parameters: Annotated[TipPositionParameters, Struct()]
+  tip_position: Annotated[TipPositionParameters, Struct()]
   final_z: F32
   seek_speed: F32
   tip_definition: Annotated[TipPickupParameters, Struct()]
@@ -1476,6 +1476,37 @@ class MphPickupTips(PrepCommand):
   dispenser_volume: F32
   dispenser_speed: F32
   tip_mask: U32
+
+
+@dataclass
+class MphMoveToPosition(PrepCommand):
+  """Move MPH gantry to absolute XYZ on IMph (cmd=17, dest=MphRoot.MPH).
+
+  Wire matches vendor ``MoveToPosition(positionX, positionY, positionZ)`` as three
+  plain ``f32`` scalars (see mph.yaml) — not :class:`GantryMoveXYZParameters`, which
+  is Pipettor-only. Use :class:`MphMoveToPosition` / :class:`MphMoveToPositionViaLane`
+  for MPH motion; :class:`PrepMoveToPosition` targets PipettorRoot only.
+  """
+
+  command_id = 17
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  x_position: F32
+  y_position: F32
+  z_position: F32
+
+
+@dataclass
+class MphMoveToPositionViaLane(PrepCommand):
+  """Move MPH gantry to absolute XYZ via lane (cmd=18, dest=MphRoot.MPH).
+
+  Same payload as :class:`MphMoveToPosition`; vendor ``MoveToPositionViaLane``.
+  """
+
+  command_id = 18
+  firmware_path = "MLPrepRoot.MphRoot.MPH"
+  x_position: F32
+  y_position: F32
+  z_position: F32
 
 
 @dataclass
@@ -1491,7 +1522,7 @@ class MphDropTips(PrepCommand):
 
   command_id = 12
   firmware_path = "MLPrepRoot.MphRoot.MPH"
-  drop_parameters: Annotated[TipDropParameters, Struct()]
+  tip_position: Annotated[TipDropParameters, Struct()]
   final_z: F32
   seek_speed: F32
   tip_roll_off_distance: F32
@@ -1746,7 +1777,12 @@ class PrepEmptyDispenser(PrepCommand):
 
 @dataclass
 class PrepMoveToPosition(PrepCommand):
-  """Move to position (cmd=26, dest=Pipettor or ChannelCoordinator)."""
+  """Move pipettor gantry to position (cmd=26, dest=PipettorRoot only).
+
+  Payload is :class:`GantryMoveXYZParameters` with ``FrontChannel`` / ``RearChannel``
+  only in ``axis_parameters``. MPH motion must use :class:`MphMoveToPosition` on
+  ``MLPrepRoot.MphRoot.MPH``, not this command.
+  """
 
   command_id = 26
   firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
@@ -1755,7 +1791,11 @@ class PrepMoveToPosition(PrepCommand):
 
 @dataclass
 class PrepMoveToPositionViaLane(PrepCommand):
-  """Move to position via lane (cmd=27, dest=Pipettor or ChannelCoordinator)."""
+  """Move pipettor gantry via lane (cmd=27, dest=PipettorRoot only).
+
+  Same constraints as :class:`PrepMoveToPosition`. MPH: use
+  :class:`MphMoveToPositionViaLane`.
+  """
 
   command_id = 27
   firmware_path = "MLPrepRoot.PipettorRoot.Pipettor"
@@ -2059,7 +2099,12 @@ class PrepGetDeckLight(PrepStatusRequest):
 
 @dataclass
 class PrepSuspendedPark(PrepCommand):
-  """Suspended park / move to load position (cmd=29, dest=MLPrep)."""
+  """Suspended park / move to load position (cmd=29, dest=MLPrep).
+
+  Reuses :class:`GantryMoveXYZParameters` on the **MLPrep** coordinator, not
+  PipettorRoot — distinct from :class:`PrepMoveToPosition` and from MPH moves
+  (:class:`MphMoveToPosition`).
+  """
 
   command_id = 29
   firmware_path = "MLPrepRoot.MLPrep"

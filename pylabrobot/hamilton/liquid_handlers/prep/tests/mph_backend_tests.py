@@ -24,8 +24,12 @@ from pylabrobot.hamilton.liquid_handlers.prep.mph_backend import (
   PrepMPHAspirateParams,
   PrepMPHDispenseParams,
   PrepMPHBackend,
+  PrepMPHPickUpTipsParams,
 )
 from pylabrobot.hamilton.liquid_handlers.prep import prep_commands as PrepCmd
+from pylabrobot.hamilton.liquid_handlers.prep.pip_backend import (
+  _build_pipettor_gantry_move_parameters,
+)
 from pylabrobot.resources import Coordinate
 from pylabrobot.resources.corning.axygen.plates import Cor_Axy_96_wellplate_500uL_Ub
 from pylabrobot.resources.hamilton import PrepDeck, hamilton_96_tiprack_50uL_NTR
@@ -137,7 +141,7 @@ def test_partial_channel_pickup_raises_value_error():
 
     with pytest.raises(ValueError, match="fully-ganged head"):
       await p.head8.pick_up_tips(
-        spots=tip_rack.column(1)[4:],  # E2, F2, G2, H2
+        tip_spots=tip_rack.column(1)[4:],  # E2, F2, G2, H2
         use_channels=[4, 5, 6, 7],
       )
 
@@ -171,7 +175,7 @@ def test_head8_tip_tracker_commit_on_pickup():
     assert p.head8 is not None
 
     await p.head8.pick_up_tips(
-      spots=tip_rack.column(0),
+      tip_spots=tip_rack.column(0),
       use_channels=[0, 1, 2, 3, 4, 5, 6, 7],
     )
     mounted = p.head8.get_mounted_tips()
@@ -197,7 +201,7 @@ def test_head8_tip_tracker_rollback_on_backend_error():
 
     with pytest.raises(RuntimeError, match="simulated backend failure"):
       await p.head8.pick_up_tips(
-        spots=tip_rack.column(0),
+        tip_spots=tip_rack.column(0),
         use_channels=[0, 1, 2, 3, 4, 5, 6, 7],
       )
 
@@ -219,7 +223,7 @@ def test_head8_volume_cleared_after_dispense():
     assert p.head8 is not None
 
     await p.head8.pick_up_tips(
-      spots=tip_rack.column(0),
+      tip_spots=tip_rack.column(0),
       use_channels=[0, 1, 2, 3, 4, 5, 6, 7],
     )
     await p.head8.aspirate(
@@ -250,7 +254,7 @@ def test_head8_full_flow_return_tips():
     await p.setup(PrepSetupParams(smart=True, force_initialize=False))
     assert p.head8 is not None
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(wells=src_plate.column(0), volume=20)
     await p.head8.dispense(wells=dst_plate.column(0), volume=20)
     await p.head8.return_tips()
@@ -271,9 +275,133 @@ def test_head8_spots_channels_length_mismatch_raises():
 
     with pytest.raises(ValueError, match="must equal len"):
       await p.head8.pick_up_tips(
-        spots=tip_rack.column(0),  # 8 spots
+        tip_spots=tip_rack.column(0),  # 8 spots
         use_channels=[0, 1],  # 2 channels — mismatch
       )
+
+    await p.stop()
+
+  asyncio.run(_run())
+
+
+def test_mph_move_to_position_command_metadata():
+  move = PrepCmd.MphMoveToPosition(x_position=1.5, y_position=2.5, z_position=120.0)
+  assert move.firmware_path == "MLPrepRoot.MphRoot.MPH"
+  assert move.command_id == 17
+  assert move.x_position == 1.5 and move.y_position == 2.5 and move.z_position == 120.0
+
+  via = PrepCmd.MphMoveToPositionViaLane(x_position=0.0, y_position=0.0, z_position=0.0)
+  assert via.command_id == 18
+  assert via.firmware_path == move.firmware_path
+  params = move.build_parameters()
+  assert params is not None
+
+
+def test_build_pipettor_gantry_move_parameters_maps_rear_front():
+  m = _build_pipettor_gantry_move_parameters(10.0, [0, 1], [20.0, 30.0], [40.0, 50.0])
+  assert m.gantry_x_position == 10.0
+  assert len(m.axis_parameters) == 2
+  assert m.axis_parameters[0].channel == PrepCmd.ChannelIndex.RearChannel
+  assert m.axis_parameters[0].y_position == 20.0
+  assert m.axis_parameters[0].z_position == 40.0
+  assert m.axis_parameters[1].channel == PrepCmd.ChannelIndex.FrontChannel
+  assert m.axis_parameters[1].y_position == 30.0
+  assert m.axis_parameters[1].z_position == 50.0
+
+
+def test_head8_move_to_position_sends_mph_wire_commands():
+  """Head8.move_to_position delegates to PrepMPHBackend (IMph MoveToPosition)."""
+
+  async def _run() -> None:
+    deck, _, _, _ = _make_deck()
+    p = Prep(deck=deck, chatterbox=True)
+    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    assert p.head8 is not None
+
+    captured: list[Any] = []
+    orig_send = p.driver.send_command
+
+    async def recording(command, **kw):
+      captured.append(command)
+      return await orig_send(command, **kw)
+
+    p.driver.send_command = recording  # type: ignore[method-assign, assignment]
+
+    await p.head8.move_to_position(11.0, 22.5, 99.0)
+    direct = [c for c in captured if isinstance(c, PrepCmd.MphMoveToPosition)]
+    assert len(direct) == 1
+    assert direct[0].x_position == 11.0
+    assert direct[0].y_position == 22.5
+    assert direct[0].z_position == 99.0
+
+    await p.head8.move_to_position(1.0, 2.0, 3.0, via_lane=True)
+    lanes = [c for c in captured if isinstance(c, PrepCmd.MphMoveToPositionViaLane)]
+    assert len(lanes) == 1
+    assert lanes[0].x_position == 1.0 and lanes[0].y_position == 2.0 and lanes[0].z_position == 3.0
+
+    await p.stop()
+
+  asyncio.run(_run())
+
+
+def test_pick_up_tips_default_pre_position_sends_mph_move_then_pickup():
+  """Default PrepMPHPickUpTipsParams.pre_position issues MphMoveToPosition before MphPickupTips."""
+
+  async def _run() -> None:
+    deck, tip_rack, _, _ = _make_deck()
+    p = Prep(deck=deck, chatterbox=True)
+    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    assert p.head8 is not None
+
+    captured: list[Any] = []
+    orig_send = p.driver.send_command
+
+    async def recording(command, **kw):
+      captured.append(command)
+      return await orig_send(command, **kw)
+
+    p.driver.send_command = recording  # type: ignore[method-assign, assignment]
+
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0), use_channels=list(range(8)))
+
+    mph_seq = [c for c in captured if isinstance(c, (PrepCmd.MphMoveToPosition, PrepCmd.MphPickupTips))]
+    assert len(mph_seq) >= 2
+    assert isinstance(mph_seq[0], PrepCmd.MphMoveToPosition)
+    assert isinstance(mph_seq[1], PrepCmd.MphPickupTips)
+
+    await p.stop()
+
+  asyncio.run(_run())
+
+
+def test_pick_up_tips_pre_position_false_skips_mph_move():
+  """Explicit pre_position=False sends only MphPickupTips among MPH move/pickup pair."""
+
+  async def _run() -> None:
+    deck, tip_rack, _, _ = _make_deck()
+    p = Prep(deck=deck, chatterbox=True)
+    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    assert p.head8 is not None
+
+    captured: list[Any] = []
+    orig_send = p.driver.send_command
+
+    async def recording(command, **kw):
+      captured.append(command)
+      return await orig_send(command, **kw)
+
+    p.driver.send_command = recording  # type: ignore[method-assign, assignment]
+
+    await p.head8.pick_up_tips(
+      tip_spots=tip_rack.column(1),
+      use_channels=list(range(8)),
+      backend_params=PrepMPHPickUpTipsParams(pre_position=False),
+    )
+
+    mph_moves = [c for c in captured if isinstance(c, PrepCmd.MphMoveToPosition)]
+    pickups = [c for c in captured if isinstance(c, PrepCmd.MphPickupTips)]
+    assert mph_moves == []
+    assert len(pickups) >= 1
 
     await p.stop()
 
@@ -289,7 +417,7 @@ def test_head8_partial_channel_aspirate_raises_value_error():
     await p.setup(PrepSetupParams(smart=True, force_initialize=False))
     assert p.head8 is not None
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
 
     with pytest.raises(ValueError, match="fully-ganged head"):
       await p.head8.aspirate(
@@ -326,7 +454,7 @@ def test_head8_v2_aspirate_sends_mphaspiratenolldmonitoring2():
 
     p.driver.send_command = recording  # type: ignore[method-assign, assignment]
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(wells=src_plate.column(0), volume=10)
 
     asp_cmds = [c for c in captured if isinstance(c, PrepCmd.MphAspirateNoLldMonitoring2)]
@@ -365,7 +493,7 @@ def test_head8_v2_dispense_sends_mphdispensetnolld2():
 
     p.driver.send_command = recording  # type: ignore[method-assign, assignment]
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(wells=src_plate.column(0), volume=10)
     await p.head8.dispense(wells=dst_plate.column(0), volume=10)
 
@@ -403,7 +531,7 @@ def test_head8_v1_fallback_when_use_v1_flag_set():
 
     p.driver.send_command = recording  # type: ignore[method-assign, assignment]
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(wells=src_plate.column(0), volume=10)
     await p.head8.dispense(wells=dst_plate.column(0), volume=10)
 
@@ -454,7 +582,7 @@ def test_head8_aspirate_tadm_sends_mphaspirate_tadm2():
 
     p.driver.send_command = recording  # type: ignore[method-assign, assignment]
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(
       wells=src_plate.column(0),
       volume=10,
@@ -489,7 +617,7 @@ def test_head8_aspirate_clld_sends_mphaspirate_with_lld2():
 
     p.driver.send_command = recording  # type: ignore[method-assign, assignment]
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(
       wells=src_plate.column(0),
       volume=10,
@@ -522,7 +650,7 @@ def test_head8_aspirate_lld_and_tadm_sends_mphaspirate_with_lld_tadm2():
 
     p.driver.send_command = recording  # type: ignore[method-assign, assignment]
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(
       wells=src_plate.column(0),
       volume=10,
@@ -548,7 +676,7 @@ def test_head8_dispense_lld_pressure_raises():
     await p.setup(PrepSetupParams(smart=True, force_initialize=False))
     assert p.head8 is not None
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(wells=src_plate.column(0), volume=10)
 
     with pytest.raises(ValueError, match="PRESSURE"):
@@ -581,7 +709,7 @@ def test_head8_command_version_override_v1():
 
     p.driver.send_command = recording  # type: ignore[method-assign, assignment]
 
-    await p.head8.pick_up_tips(spots=tip_rack.column(0))
+    await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
     await p.head8.aspirate(
       wells=src_plate.column(0),
       volume=10,

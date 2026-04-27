@@ -245,6 +245,8 @@ class PrepPIPPickUpTipsParams(BackendParams):
   enable_tadm: bool = False
   dispenser_volume: float = 0.0
   dispenser_speed: float = 250.0
+  minimum_traverse_height_at_beginning_of_a_command: Optional[float] = None
+  pre_position: bool = True
 
 
 @dataclass
@@ -414,6 +416,41 @@ _CHANNEL_INDEX = {
   0: PrepCmd.ChannelIndex.RearChannel,
   1: PrepCmd.ChannelIndex.FrontChannel,
 }
+
+
+def _build_pipettor_gantry_move_parameters(
+  x: float,
+  channels: List[int],
+  y: Union[float, List[float]],
+  z: Union[float, List[float]],
+) -> PrepCmd.GantryMoveXYZParameters:
+  """Build :class:`~prep_commands.GantryMoveXYZParameters` for PipettorRoot move commands.
+
+  Only ``FrontChannel`` and ``RearChannel`` may appear in ``axis_parameters``. MPH
+  gantry moves must use :class:`~prep_commands.MphMoveToPosition` instead.
+  """
+  axis_parameters: List[PrepCmd.ChannelYZMoveParameters] = []
+  for i, ch in enumerate(channels):
+    y_i = y[i] if isinstance(y, list) else y
+    z_i = z[i] if isinstance(z, list) else z
+    enum_ch = _CHANNEL_INDEX[ch]
+    if enum_ch not in (
+      PrepCmd.ChannelIndex.FrontChannel,
+      PrepCmd.ChannelIndex.RearChannel,
+    ):
+      raise ValueError(
+        f"Pipettor gantry move does not support channel index {ch} (enum {enum_ch!r}). "
+        "MPH motion uses PrepMPHBackend / MphMoveToPosition on MLPrepRoot.MphRoot.MPH."
+      )
+    axis_parameters.append(
+      PrepCmd.ChannelYZMoveParameters(
+        default_values=False, channel=enum_ch, y_position=y_i, z_position=z_i
+      )
+    )
+  return PrepCmd.GantryMoveXYZParameters(
+    default_values=False, gantry_x_position=x, axis_parameters=axis_parameters
+  )
+
 
 # Channel index -> deck waste resource name (PrepDeck: waste_rear, waste_front, waste_mph)
 _CHANNEL_TO_WASTE_NAME = {
@@ -651,7 +688,7 @@ class PrepPIPBackend(PIPBackend):
     except Exception:
       return 0
 
-  def _resolve_traverse_height(self, final_z: Optional[float]) -> float:
+  def _resolve_traverse_height(self, final_z: Optional[float] = None) -> float:
     """Resolve final_z: explicit arg > user-set default > probed value. Raises if none available."""
     if final_z is not None:
       return final_z
@@ -730,6 +767,18 @@ class PrepPIPBackend(PIPBackend):
       is_needle=False,
       is_tool=False,
     )
+
+    if p.pre_position:
+      traverse_h = (
+        p.minimum_traverse_height_at_beginning_of_a_command or resolved_final_z
+      )
+      locs = [indexed_ops[ch].resource.get_absolute_location("c", "c", "t") for ch in use_channels]
+      await self.move_to_position(
+        x=locs[0].x,
+        y=[loc.y for loc in locs],
+        z=traverse_h,
+        use_channels=use_channels,
+      )
 
     await self._driver.send_command(
       PrepCmd.PrepPickUpTips(
@@ -2069,18 +2118,7 @@ class PrepPIPBackend(PIPBackend):
         if z_i > b["z_max"]:
           raise ValueError(f"z={z_i} above channel {ch} maximum {b['z_max']:.1f}")
 
-    axis_parameters: List[PrepCmd.ChannelYZMoveParameters] = []
-    for i, ch in enumerate(channels):
-      y_i = y if isinstance(y, (int, float)) else y[i]
-      z_i = z if isinstance(z, (int, float)) else z[i]
-      axis_parameters.append(
-        PrepCmd.ChannelYZMoveParameters(
-          default_values=False, channel=_CHANNEL_INDEX[ch], y_position=y_i, z_position=z_i
-        )
-      )
-    move_parameters = PrepCmd.GantryMoveXYZParameters(
-      default_values=False, gantry_x_position=x, axis_parameters=axis_parameters
-    )
+    move_parameters = _build_pipettor_gantry_move_parameters(x, channels, y, z)
 
     if via_lane:
       await self._driver.send_command(

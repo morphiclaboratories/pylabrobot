@@ -20,20 +20,20 @@ class Head8Backend(CapabilityBackend, metaclass=ABCMeta):
 
   @abstractmethod
   async def pick_up_tips8(
-    self, pickup: Head8TipPickup, backend_params: Optional[BackendParams] = None
+    self, op: Head8TipPickup, backend_params: Optional[BackendParams] = None
   ):
     """Pick up tips using the 8MPH head."""
 
   @abstractmethod
   async def drop_tips8(
-    self, drop: Head8TipDrop, backend_params: Optional[BackendParams] = None
+    self, op: Head8TipDrop, backend_params: Optional[BackendParams] = None
   ):
     """Drop tips using the 8MPH head."""
 
   @abstractmethod
   async def aspirate8(
     self,
-    aspiration: Union[Head8AspirationWells, Head8AspirationContainer],
+    op: Union[Head8AspirationWells, Head8AspirationContainer],
     backend_params: Optional[BackendParams] = None,
   ):
     """Aspirate using the 8MPH head."""
@@ -41,7 +41,7 @@ class Head8Backend(CapabilityBackend, metaclass=ABCMeta):
   @abstractmethod
   async def dispense8(
     self,
-    dispense: Union[Head8DispenseWells, Head8DispenseContainer],
+    op: Union[Head8DispenseWells, Head8DispenseContainer],
     backend_params: Optional[BackendParams] = None,
   ):
     """Dispense using the 8MPH head."""

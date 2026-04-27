@@ -40,6 +40,10 @@ class Head8(Capability):
   7 = bottommost). ``spots`` / ``wells`` lists are parallel to ``use_channels``:
   ``spots[i]`` is addressed by ``use_channels[i]``.
 
+  Use :meth:`move_to_position` for absolute gantry moves in the same deck frame as
+  tip operations (probe-0 / row-A reference). On Prep, this parallels
+  ``prep.pip.move_to_position`` for the dual-channel pipettor.
+
   See the prep user guide for usage examples.
   """
 
@@ -87,7 +91,7 @@ class Head8(Capability):
   @need_capability_ready
   async def pick_up_tips(
     self,
-    spots: List[TipSpot],
+    tip_spots: List[TipSpot],
     use_channels: Optional[List[int]] = None,
     offset: Coordinate = Coordinate.zero(),
     backend_params: Optional[BackendParams] = None,
@@ -95,23 +99,23 @@ class Head8(Capability):
     """Pick up tips from the given tip spots.
 
     Args:
-      spots: Tip spots to pick up from. ``spots[i]`` is addressed by ``use_channels[i]``.
-      use_channels: 0-indexed channel indices. Defaults to ``range(len(spots))``.
+      tip_spots: Tip spots to pick up from. ``tip_spots[i]`` is addressed by ``use_channels[i]``.
+      use_channels: 0-indexed channel indices. Defaults to ``range(len(tip_spots))``.
       offset: Additional offset applied to all positions.
       backend_params: Vendor-specific parameters.
     """
     offset = self.default_offset + offset
-    use_channels = self._resolve_use_channels(use_channels, n=len(spots))
+    use_channels = self._resolve_use_channels(use_channels, n=len(tip_spots))
 
-    if len(spots) != len(use_channels):
+    if len(tip_spots) != len(use_channels):
       raise ValueError(
-        f"len(spots)={len(spots)} must equal len(use_channels)={len(use_channels)}"
+        f"len(tip_spots)={len(tip_spots)} must equal len(use_channels)={len(use_channels)}"
       )
-    if not spots:
+    if not tip_spots:
       return
 
     tips: List[Optional[Tip]] = []
-    for spot, ch in zip(spots, use_channels):
+    for spot, ch in zip(tip_spots, use_channels):
       if not does_tip_tracking() and self._tip_trackers[ch].has_tip:
         self._tip_trackers[ch].remove_tip()
       if spot.has_tip():
@@ -124,29 +128,57 @@ class Head8(Capability):
         tips.append(None)
 
     pickup_op = Head8TipPickup(
-      spots=spots,
+      tip_spots=tip_spots,
       use_channels=tuple(use_channels),
       offset=offset,
       tips=tips,
     )
     try:
-      await self.backend.pick_up_tips8(pickup=pickup_op, backend_params=backend_params)
+      await self.backend.pick_up_tips8(op=pickup_op, backend_params=backend_params)
     except Exception:
-      for spot, ch in zip(spots, use_channels):
+      for spot, ch in zip(tip_spots, use_channels):
         if does_tip_tracking() and not spot.tracker.is_disabled:
           spot.tracker.rollback()
         self._tip_trackers[ch].rollback()
       raise
     else:
-      for spot, ch in zip(spots, use_channels):
+      for spot, ch in zip(tip_spots, use_channels):
         if does_tip_tracking() and not spot.tracker.is_disabled:
           spot.tracker.commit()
         self._tip_trackers[ch].commit()
 
   @need_capability_ready
+  async def move_to_position(
+    self,
+    x: float,
+    y: float,
+    z: float,
+    *,
+    via_lane: bool = False,
+  ) -> None:
+    """Move the ganged head to absolute deck coordinates (mm).
+
+    Delegates to the backend when it implements ``move_to_position`` (e.g.
+    :class:`~pylabrobot.hamilton.liquid_handlers.prep.mph_backend.PrepMPHBackend`).
+
+    Args:
+      x: Gantry X.
+      y: Gantry Y at probe 0 (row A reference).
+      z: Z height (e.g. traverse).
+      via_lane: If True, request the firmware move-via-lane variant.
+    """
+    mover = getattr(self.backend, "move_to_position", None)
+    if mover is None or not callable(mover):
+      raise NotImplementedError(
+        "This Head8 backend does not implement move_to_position "
+        "(Hamilton Prep requires PrepMPHBackend)."
+      )
+    await mover(x, y, z, via_lane=via_lane)
+
+  @need_capability_ready
   async def drop_tips(
     self,
-    spots: List[Union[TipSpot, Trash]],
+    tip_spots: List[Union[TipSpot, Trash]],
     use_channels: Optional[List[int]] = None,
     allow_nonzero_volume: bool = False,
     offset: Coordinate = Coordinate.zero(),
@@ -155,7 +187,7 @@ class Head8(Capability):
     """Drop tips to the given tip spots or trash.
 
     Args:
-      spots: Destinations parallel to ``use_channels``.
+      tip_spots: Destinations parallel to ``use_channels``.
       use_channels: 0-indexed channel indices. Defaults to all channels with tips.
       allow_nonzero_volume: If True, drop even if tips carry liquid.
       offset: Additional offset applied to all positions.
@@ -164,15 +196,15 @@ class Head8(Capability):
     offset = self.default_offset + offset
     use_channels = self._resolve_use_channels(use_channels)
 
-    if len(spots) != len(use_channels):
+    if len(tip_spots) != len(use_channels):
       raise ValueError(
-        f"len(spots)={len(spots)} must equal len(use_channels)={len(use_channels)}"
+        f"len(tip_spots)={len(tip_spots)} must equal len(use_channels)={len(use_channels)}"
       )
     if not use_channels:
       return
 
     dropped_tips: List[Optional[Tip]] = []
-    for spot, ch in zip(spots, use_channels):
+    for spot, ch in zip(tip_spots, use_channels):
       if not self._tip_trackers[ch].has_tip:
         dropped_tips.append(None)
         continue
@@ -187,21 +219,21 @@ class Head8(Capability):
       dropped_tips.append(tip)
 
     drop_op = Head8TipDrop(
-      spots=spots,
+      resources=tip_spots,
       use_channels=tuple(use_channels),
       offset=offset,
       tips=dropped_tips,
     )
     try:
-      await self.backend.drop_tips8(drop=drop_op, backend_params=backend_params)
+      await self.backend.drop_tips8(op=drop_op, backend_params=backend_params)
     except Exception:
-      for spot, ch in zip(spots, use_channels):
+      for spot, ch in zip(tip_spots, use_channels):
         if isinstance(spot, TipSpot) and does_tip_tracking() and not spot.tracker.is_disabled:
           spot.tracker.rollback()
         self._tip_trackers[ch].rollback()
       raise
     else:
-      for spot, ch in zip(spots, use_channels):
+      for spot, ch in zip(tip_spots, use_channels):
         if isinstance(spot, TipSpot) and does_tip_tracking() and not spot.tracker.is_disabled:
           spot.tracker.commit()
         self._tip_trackers[ch].commit()
@@ -212,7 +244,7 @@ class Head8(Capability):
     use_channels: Optional[List[int]] = None,
     allow_nonzero_volume: bool = False,
     offset: Coordinate = Coordinate.zero(),
-    backend_params: Optional[BackendParams] = None,
+    drop_backend_params: Optional[BackendParams] = None,
   ):
     """Return tips to the spots they were picked up from.
 
@@ -220,10 +252,10 @@ class Head8(Capability):
       use_channels: Channels to return tips for. Defaults to all channels with tips.
       allow_nonzero_volume: If True, return even if tips carry liquid.
       offset: Additional offset.
-      backend_params: Vendor-specific parameters.
+      drop_backend_params: Vendor-specific parameters for the drop.
     """
     use_channels = self._resolve_use_channels(use_channels)
-    spots: List[Union[TipSpot, Trash]] = []
+    tip_spots: List[Union[TipSpot, Trash]] = []
     active: List[int] = []
     for ch in use_channels:
       if not self._tip_trackers[ch].has_tip:
@@ -231,17 +263,17 @@ class Head8(Capability):
       origin = self._tip_trackers[ch].get_tip_origin()
       if origin is None:
         raise RuntimeError(f"Channel {ch} has no tip origin — cannot return tip")
-      spots.append(origin)
+      tip_spots.append(origin)
       active.append(ch)
 
     if not active:
       return
     await self.drop_tips(
-      spots=spots,
+      tip_spots=tip_spots,
       use_channels=active,
       allow_nonzero_volume=allow_nonzero_volume,
       offset=offset,
-      backend_params=backend_params,
+      backend_params=drop_backend_params,
     )
 
   @need_capability_ready
@@ -250,7 +282,8 @@ class Head8(Capability):
     trash: Optional[Trash] = None,
     use_channels: Optional[List[int]] = None,
     allow_nonzero_volume: bool = True,
-    backend_params: Optional[BackendParams] = None,
+    offset: Coordinate = Coordinate.zero(),
+    drop_backend_params: Optional[BackendParams] = None,
   ):
     """Discard tips into the trash.
 
@@ -258,7 +291,8 @@ class Head8(Capability):
       trash: Trash resource. If None, looks up 8MPH trash on the deck.
       use_channels: Channels to discard tips from. Defaults to all channels with tips.
       allow_nonzero_volume: If True, discard even if tips carry liquid.
-      backend_params: Vendor-specific parameters.
+      offset: Additional offset applied to the drop position.
+      drop_backend_params: Vendor-specific parameters for the drop.
     """
     if trash is None:
       if self.default_trash is not None:
@@ -273,10 +307,11 @@ class Head8(Capability):
     if not active:
       return
     await self.drop_tips(
-      spots=[trash] * len(active),
+      tip_spots=[trash] * len(active),
       use_channels=active,
       allow_nonzero_volume=allow_nonzero_volume,
-      backend_params=backend_params,
+      offset=offset,
+      backend_params=drop_backend_params,
     )
 
   @need_capability_ready
@@ -380,7 +415,7 @@ class Head8(Capability):
       all_containers = list(seen_wells.values())
 
     try:
-      await self.backend.aspirate8(aspiration=aspiration, backend_params=backend_params)
+      await self.backend.aspirate8(op=aspiration, backend_params=backend_params)
     except Exception:
       for tip in (tips[ch] for ch in use_channels):
         if tip is not None:
@@ -508,7 +543,7 @@ class Head8(Capability):
       all_containers = list(seen_wells.values())
 
     try:
-      await self.backend.dispense8(dispense=dispense_op, backend_params=backend_params)
+      await self.backend.dispense8(op=dispense_op, backend_params=backend_params)
     except Exception:
       for tip in (tips[ch] for ch in use_channels):
         if tip is not None:

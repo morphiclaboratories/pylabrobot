@@ -158,10 +158,10 @@ class MultiHeadDispenseContainer:
 class Head8TipPickup:
   """Pick up tips with the 8MPH head.
 
-  ``spots[i]`` is the tip spot for active channel ``use_channels[i]``.
+  ``tip_spots[i]`` is the tip spot for active channel ``use_channels[i]``.
   """
 
-  spots: List[TipSpot]
+  tip_spots: List[TipSpot]
   use_channels: Tuple[int, ...]
   offset: Coordinate
   tips: Sequence[Optional[Tip]]
@@ -171,11 +171,11 @@ class Head8TipPickup:
 class Head8TipDrop:
   """Drop tips with the 8MPH head.
 
-  ``spots[i]`` is the destination (TipSpot or Trash) for active channel ``use_channels[i]``.
+  ``resources[i]`` is the destination (TipSpot or Trash) for active channel ``use_channels[i]``.
   ``tips[i]`` carries the tip geometry so the backend can compute drop heights.
   """
 
-  spots: List[Union[TipSpot, Trash]]
+  resources: List[Union[TipSpot, Trash]]
   use_channels: Tuple[int, ...]
   offset: Coordinate
   tips: Sequence[Optional[Tip]]

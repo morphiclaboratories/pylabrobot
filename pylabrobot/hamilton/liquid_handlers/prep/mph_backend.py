@@ -73,6 +73,8 @@ class PrepMPHPickUpTipsParams(BackendParams):
   enable_tadm: bool = False
   dispenser_volume: float = 0.0
   dispenser_speed: float = 250.0
+  minimum_traverse_height_at_beginning_of_a_command: Optional[float] = None
+  pre_position: bool = True
 
 
 @dataclass
@@ -157,6 +159,7 @@ class PrepMPHBackend(Head8Backend):
 
   def __init__(
     self,
+    *,
     driver: "PrepDriver",
     info: "PrepInstrumentInfo",
     default_traverse_height: Optional[float] = None,
@@ -164,7 +167,7 @@ class PrepMPHBackend(Head8Backend):
   ) -> None:
     self._driver = driver
     self._info = info
-    self._default_traverse_height = default_traverse_height
+    self._user_traverse_height = default_traverse_height
     self._use_v1_aspirate_dispense: bool = use_v1_aspirate_dispense
     self.channels: list = []  # populated by build_prep_channels after construction
     self._supports_v2_pipetting: Optional[bool] = None
@@ -220,8 +223,8 @@ class PrepMPHBackend(Head8Backend):
   def _resolve_traverse_height(self, final_z: Optional[float] = None) -> float:
     if final_z is not None:
       return final_z
-    if self._default_traverse_height is not None:
-      return self._default_traverse_height
+    if self._user_traverse_height is not None:
+      return self._user_traverse_height
     val = self._info.config.default_traverse_height
     if val is None:
       raise RuntimeError("No traverse height available; set default_traverse_height")
@@ -670,12 +673,46 @@ class PrepMPHBackend(Head8Backend):
       )
 
   # ---------------------------------------------------------------------------
+  # MPH gantry (IMph MoveToPosition)
+  # ---------------------------------------------------------------------------
+
+  async def move_to_position(
+    self,
+    x: float,
+    y: float,
+    z: float,
+    *,
+    via_lane: bool = False,
+  ) -> None:
+    """Move the ganged 8-channel head to absolute deck ``(x, y, z)`` (mm).
+
+    Sends :class:`~prep_commands.MphMoveToPosition` or
+    :class:`~prep_commands.MphMoveToPositionViaLane` on ``MLPrepRoot.MphRoot.MPH``.
+    One pose for the whole head — unlike :meth:`PrepPIPBackend.move_to_position`,
+    there are no per-channel ``y``/``z`` lists.
+
+    Args:
+      x: Gantry X.
+      y: Gantry Y at the probe-0 (row A) reference.
+      z: Z height (e.g. traverse).
+      via_lane: Use lane-aware move when True.
+    """
+    if via_lane:
+      await self._driver.send_command(
+        PrepCmd.MphMoveToPositionViaLane(x_position=x, y_position=y, z_position=z)
+      )
+    else:
+      await self._driver.send_command(
+        PrepCmd.MphMoveToPosition(x_position=x, y_position=y, z_position=z)
+      )
+
+  # ---------------------------------------------------------------------------
   # Head8Backend interface
   # ---------------------------------------------------------------------------
 
   async def pick_up_tips8(
     self,
-    pickup: Head8TipPickup,
+    op: Head8TipPickup,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
     p = (
@@ -683,26 +720,31 @@ class PrepMPHBackend(Head8Backend):
       if isinstance(backend_params, PrepMPHPickUpTipsParams)
       else PrepMPHPickUpTipsParams()
     )
-    use_channels = list(pickup.use_channels)
+    use_channels = list(op.use_channels)
     self._require_all_channels(use_channels, "pick_up_tips8")
     final_z = self._resolve_traverse_height(p.final_z)
 
-    ref_spot = pickup.spots[0]
+    ref_spot = op.tip_spots[0]
     rack = ref_spot.parent
     logger.info(
-      "[Prep MPH] pick_up_tips: rack=%s, spots=%s",
+      "[Prep MPH] pick_up_tips: rack=%s, tip_spots=%s",
       rack.name if rack is not None else ref_spot.name,
-      [s.name.rsplit("_", 1)[-1] for s in pickup.spots],
+      [s.name.rsplit("_", 1)[-1] for s in op.tip_spots],
     )
     # Use the tip from the struct — the spot tracker is already cleared by Head8 before
     # this backend method is invoked, so ref_spot.get_tip() would fail.
-    tip = pickup.tips[0]
+    tip = op.tips[0]
     if tip is None:
       raise RuntimeError("pick_up_tips8: first spot has no tip")
     loc = ref_spot.get_absolute_location("c", "c", "t")
 
-    # spots[0] is always row-A (probe 0, highest Y) since all 8 channels are required.
-    tip_parameters = PrepCmd.TipPositionParameters.for_op(
+    # Pre-position uses the same absolute frame as tip_position below (probe 0 / row A).
+    if p.pre_position:
+      traverse_h = p.minimum_traverse_height_at_beginning_of_a_command or final_z
+      await self.move_to_position(loc.x, loc.y, traverse_h)
+
+    # tip_spots[0] is always row-A (probe 0, highest Y) since all 8 channels are required.
+    tip_position = PrepCmd.TipPositionParameters.for_op(
       PrepCmd.ChannelIndex.MPHChannel, loc, tip, z_seek_offset=p.z_seek_offset
     )
     tip_definition = PrepCmd.TipPickupParameters(
@@ -716,7 +758,7 @@ class PrepMPHBackend(Head8Backend):
     )
     await self._driver.send_command(
       PrepCmd.MphPickupTips(
-        tip_parameters=tip_parameters,
+        tip_position=tip_position,
         final_z=final_z,
         seek_speed=p.seek_speed,
         tip_definition=tip_definition,
@@ -729,7 +771,7 @@ class PrepMPHBackend(Head8Backend):
 
   async def drop_tips8(
     self,
-    drop: Head8TipDrop,
+    op: Head8TipDrop,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
     p = (
@@ -737,30 +779,30 @@ class PrepMPHBackend(Head8Backend):
       if isinstance(backend_params, PrepMPHDropTipsParams)
       else PrepMPHDropTipsParams()
     )
-    use_channels = list(drop.use_channels)
+    use_channels = list(op.use_channels)
     self._require_all_channels(use_channels, "drop_tips8")
     final_z = self._resolve_traverse_height(p.final_z)
 
-    ref_spot = drop.spots[0]
+    ref_spot = op.resources[0]
     is_trash = isinstance(ref_spot, Trash)
     dest = ref_spot if is_trash else ref_spot.parent
     logger.info(
-      "[Prep MPH] drop_tips: dest=%s, spots=%s",
+      "[Prep MPH] drop_tips: dest=%s, resources=%s",
       dest.name if dest is not None else ref_spot.name,
-      [s.name.rsplit("_", 1)[-1] for s in drop.spots],
+      [s.name.rsplit("_", 1)[-1] for s in op.resources],
     )
-    tip = drop.tips[0]
+    tip = op.tips[0]
     if tip is None:
       raise RuntimeError("drop_tips8: no tip on first channel")
 
-    # spots[0] = probe 0 (row A, highest Y). Use "c","c","t" consistently for
+    # resources[0] = probe 0 (row A, highest Y). Use "c","c","t" consistently for
     # both tip spots and trash — matches pip_backend.drop_tips and TipDropParameters.for_op.
     loc = ref_spot.get_absolute_location("c", "c", "t")
     if not is_trash:
-      loc = loc + drop.offset
+      loc = loc + op.offset
     drop_type = PrepCmd.TipDropType.Stall if is_trash else PrepCmd.TipDropType.FixedHeight
 
-    drop_parameters = PrepCmd.TipDropParameters.for_op(
+    tip_position = PrepCmd.TipDropParameters.for_op(
       PrepCmd.ChannelIndex.MPHChannel,
       loc,
       tip,
@@ -770,7 +812,7 @@ class PrepMPHBackend(Head8Backend):
     roll_off = 3.0 if (is_trash and p.tip_roll_off_distance == 0.0) else p.tip_roll_off_distance
     await self._driver.send_command(
       PrepCmd.MphDropTips(
-        drop_parameters=drop_parameters,
+        tip_position=tip_position,
         final_z=final_z,
         seek_speed=p.seek_speed,
         tip_roll_off_distance=roll_off,
@@ -779,7 +821,7 @@ class PrepMPHBackend(Head8Backend):
 
   async def aspirate8(
     self,
-    aspiration: Union[Head8AspirationWells, Head8AspirationContainer],
+    op: Union[Head8AspirationWells, Head8AspirationContainer],
     backend_params: Optional[BackendParams] = None,
   ) -> None:
     p = (
@@ -787,9 +829,9 @@ class PrepMPHBackend(Head8Backend):
       if isinstance(backend_params, PrepMPHAspirateParams)
       else PrepMPHAspirateParams()
     )
-    use_channels = list(aspiration.use_channels)
+    use_channels = list(op.use_channels)
     self._require_all_channels(use_channels, "aspirate8")
-    tip = next((t for t in aspiration.tips if t is not None), None)
+    tip = next((t for t in op.tips if t is not None), None)
     traverse_z = self._resolve_traverse_height()
     final_z = (
       p.z_final
@@ -800,26 +842,26 @@ class PrepMPHBackend(Head8Backend):
     )
 
     op_targets: Union[str, List[str]]
-    if isinstance(aspiration, Head8AspirationContainer):
-      container = aspiration.container
+    if isinstance(op, Head8AspirationContainer):
+      container = op.container
       self._validate_container_span(container)
       resource_name = container.parent.name if container.parent is not None else container.name
       op_targets = container.name
       loc = container.get_absolute_location("c", "c", "cavity_bottom")
       ref_x, ref_y = loc.x, loc.y + 3.5 * PROBE_PITCH_MM
-      wg = _absolute_z_from_well(container, aspiration.liquid_height)
+      wg = _absolute_z_from_well(container, op.liquid_height)
       ref_segments = p.container_segments or (
         _build_container_segments(container) if p.auto_container_geometry else []
       )
       ref_resource = container
     else:
-      wells = aspiration.wells
+      wells = op.wells
       self._resolve_probe_positions(wells)  # validates 9mm pitch; raises on mismatch
       resource_name = wells[0].parent.name if wells[0].parent is not None else wells[0].name
       op_targets = [w.name.rsplit("_", 1)[-1] for w in wells]
       ref_loc = wells[0].get_absolute_location("c", "c", "cavity_bottom")
       ref_x, ref_y = ref_loc.x, ref_loc.y
-      wg = _absolute_z_from_well(wells[0], aspiration.liquid_height)
+      wg = _absolute_z_from_well(wells[0], op.liquid_height)
       ref_segments = p.container_segments or (
         _build_container_segments(wells[0]) if p.auto_container_geometry else []
       )
@@ -835,14 +877,14 @@ class PrepMPHBackend(Head8Backend):
     transport_air_volume = p.transport_air_volume if p.transport_air_volume is not None else 0.0
     z_liquid_exit_speed = p.z_liquid_exit_speed if p.z_liquid_exit_speed is not None else 10.0
     prewet_volume = p.prewet_volume if p.prewet_volume is not None else 0.0
-    blowout_volume = aspiration.blow_out_air_volume or 0.0
+    blowout_volume = op.blow_out_air_volume or 0.0
 
     logger.info(
       "[Prep MPH] aspirate: resource=%s, wells=%s, volume=%.3f, flow_rate=%s",
       resource_name,
       op_targets,
-      aspiration.volume,
-      round(aspiration.flow_rate, 3) if aspiration.flow_rate is not None else None,
+      op.volume,
+      round(op.flow_rate, 3) if op.flow_rate is not None else None,
     )
 
     tube_radius = _effective_radius(ref_resource)
@@ -858,7 +900,7 @@ class PrepMPHBackend(Head8Backend):
     param_struct = assemble(
       ref_x=ref_x,
       ref_y=ref_y,
-      volume=aspiration.volume,
+      volume=op.volume,
       tube_radius=tube_radius,
       final_z=final_z,
       z_minimum=z_minimum,
@@ -870,7 +912,7 @@ class PrepMPHBackend(Head8Backend):
       z_liquid_exit_speed=z_liquid_exit_speed,
       prewet_volume=prewet_volume,
       blowout_volume=blowout_volume,
-      flow_rate=aspiration.flow_rate,
+      flow_rate=op.flow_rate,
       segments=ref_segments,
       effective_lld=effective_lld,
       is_tadm=is_tadm,
@@ -892,7 +934,7 @@ class PrepMPHBackend(Head8Backend):
 
   async def dispense8(
     self,
-    dispense: Union[Head8DispenseWells, Head8DispenseContainer],
+    op: Union[Head8DispenseWells, Head8DispenseContainer],
     backend_params: Optional[BackendParams] = None,
   ) -> None:
     p = (
@@ -900,9 +942,9 @@ class PrepMPHBackend(Head8Backend):
       if isinstance(backend_params, PrepMPHDispenseParams)
       else PrepMPHDispenseParams()
     )
-    use_channels = list(dispense.use_channels)
+    use_channels = list(op.use_channels)
     self._require_all_channels(use_channels, "dispense8")
-    tip = next((t for t in dispense.tips if t is not None), None)
+    tip = next((t for t in op.tips if t is not None), None)
     traverse_z = self._resolve_traverse_height()
     final_z = (
       p.z_final
@@ -913,26 +955,26 @@ class PrepMPHBackend(Head8Backend):
     )
 
     op_targets: Union[str, List[str]]
-    if isinstance(dispense, Head8DispenseContainer):
-      container = dispense.container
+    if isinstance(op, Head8DispenseContainer):
+      container = op.container
       self._validate_container_span(container)
       resource_name = container.parent.name if container.parent is not None else container.name
       op_targets = container.name
       loc = container.get_absolute_location("c", "c", "cavity_bottom")
       ref_x, ref_y = loc.x, loc.y + 3.5 * PROBE_PITCH_MM
-      wg = _absolute_z_from_well(container, dispense.liquid_height)
+      wg = _absolute_z_from_well(container, op.liquid_height)
       ref_segments = p.container_segments or (
         _build_container_segments(container) if p.auto_container_geometry else []
       )
       ref_resource = container
     else:
-      wells = dispense.wells
+      wells = op.wells
       self._resolve_probe_positions(wells)  # validates 9mm pitch; raises on mismatch
       resource_name = wells[0].parent.name if wells[0].parent is not None else wells[0].name
       op_targets = [w.name.rsplit("_", 1)[-1] for w in wells]
       ref_loc = wells[0].get_absolute_location("c", "c", "cavity_bottom")
       ref_x, ref_y = ref_loc.x, ref_loc.y
-      wg = _absolute_z_from_well(wells[0], dispense.liquid_height)
+      wg = _absolute_z_from_well(wells[0], op.liquid_height)
       ref_segments = p.container_segments or (
         _build_container_segments(wells[0]) if p.auto_container_geometry else []
       )
@@ -954,8 +996,8 @@ class PrepMPHBackend(Head8Backend):
       "[Prep MPH] dispense: resource=%s, wells=%s, volume=%.3f, flow_rate=%s",
       resource_name,
       op_targets,
-      dispense.volume,
-      round(dispense.flow_rate, 3) if dispense.flow_rate is not None else None,
+      op.volume,
+      round(op.flow_rate, 3) if op.flow_rate is not None else None,
     )
 
     tube_radius = _effective_radius(ref_resource)
@@ -972,7 +1014,7 @@ class PrepMPHBackend(Head8Backend):
     param_struct = assemble(
       ref_x=ref_x,
       ref_y=ref_y,
-      volume=dispense.volume,
+      volume=op.volume,
       tube_radius=tube_radius,
       final_z=final_z,
       z_minimum=z_minimum,
@@ -984,7 +1026,7 @@ class PrepMPHBackend(Head8Backend):
       z_liquid_exit_speed=z_liquid_exit_speed,
       stop_back_volume=stop_back_volume,
       cutoff_speed=cutoff_speed,
-      flow_rate=dispense.flow_rate,
+      flow_rate=op.flow_rate,
       segments=ref_segments,
       effective_lld=effective_lld,
       lld_params=lld_params,
