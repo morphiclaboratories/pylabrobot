@@ -1307,6 +1307,26 @@ class PrepStatusRequest(PrepCommand):
   action_code = 0
 
 
+@dataclass
+class PrepProbeRequest(PrepCommand):
+  """Ad-hoc STATUS_REQUEST with runtime command_id and interface_id.
+
+  Use with :meth:`~PrepDriver.send_query` when the target command_id is only
+  known at runtime. Always supply ``dest=`` explicitly; the JIT firmware-path
+  resolver is bypassed because ``firmware_path = None``.
+
+  ``command_id`` and ``interface_id`` are dataclass instance fields that shadow
+  the class-level defaults in :class:`~pylabrobot.hamilton.tcp.commands.TCPCommand`,
+  so :meth:`TCPCommand.build` picks up the per-instance values correctly.
+  """
+
+  action_code = 0
+  firmware_path = None
+  dest: Address
+  command_id: int
+  interface_id: int = 3
+
+
 # =============================================================================
 # Pipettor / ChannelCoordinator command classes
 # =============================================================================

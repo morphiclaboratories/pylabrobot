@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import (
   TYPE_CHECKING,
   Any,
+  Generic,
   List,
   Literal,
   NamedTuple,
@@ -24,7 +25,6 @@ from typing import (
   Tuple,
   TypeVar,
   Union,
-  cast,
 )
 
 if TYPE_CHECKING:
@@ -46,6 +46,8 @@ from pylabrobot.hamilton.liquid_handlers.liquid_class_resolver import (
   corrected_volumes_for_ops,
   resolve_hamilton_liquid_classes,
 )
+from pylabrobot.capabilities.liquid_handling.errors import ChannelizedError
+from pylabrobot.hamilton.tcp.hoi_error import HoiError
 from pylabrobot.hamilton.tcp.packets import Address
 from pylabrobot.resources import Coordinate, Tip
 from pylabrobot.resources.hamilton import HamiltonTip, TipSize
@@ -67,6 +69,7 @@ from .channels import (
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
+_OpT = TypeVar("_OpT", Aspiration, Dispense)
 
 
 # =============================================================================
@@ -307,9 +310,6 @@ class PrepPIPDispenseParams(BackendParams):
   command_version: Optional[Literal["v1", "v2"]] = None
 
 
-_ChannelLiquidOp = Union[Aspiration, Dispense]
-
-
 def _effective_radius(resource) -> float:
   """Effective radius for PrepCmd.CommonParameters.tube_radius.
 
@@ -505,7 +505,7 @@ class _DispenseChannelKit:
 
 
 @dataclass(frozen=True)
-class _ChannelContext:
+class _ChannelContext(Generic[_OpT]):
   """Shared resolved state for aspirate/dispense channel resolution.
 
   Computed once by ``_resolve_channel_context``; operation-specific resolve
@@ -516,7 +516,7 @@ class _ChannelContext:
   hlcs: List[Optional[HamiltonLiquidClass]]
   disable_volume_correction: List[bool]
   ch_to_idx: dict[int, int]
-  indexed_ops: dict[int, _ChannelLiquidOp]
+  indexed_ops: dict[int, _OpT]
   volumes: List[float]
   well_geometry: List[_WellGeometry]
   z_minimum: List[float]
@@ -942,7 +942,7 @@ class PrepPIPBackend(PIPBackend):
 
   def _resolve_channel_context(
     self,
-    ops: Sequence[_ChannelLiquidOp],
+    ops: Sequence[_OpT],
     use_channels: List[int],
     *,
     z_final: Optional[List[float]] = None,
@@ -954,7 +954,7 @@ class PrepPIPBackend(PIPBackend):
     auto_container_geometry: bool = False,
     hamilton_liquid_classes: Optional[List[HamiltonLiquidClass]] = None,
     disable_volume_correction: Optional[List[bool]] = None,
-  ) -> _ChannelContext:
+  ) -> _ChannelContext[_OpT]:
     """Resolve shared per-channel state for aspirate or dispense.
 
     Validates inputs, resolves HLCs, computes volume corrections, well geometry,
@@ -1098,8 +1098,7 @@ class PrepPIPBackend(PIPBackend):
       if ch not in ctx.indexed_ops:
         continue
       idx = ctx.ch_to_idx[ch]
-      op = ctx.indexed_ops[ch]
-      asp = cast(Aspiration, op)
+      asp = ctx.indexed_ops[ch]
       loc = asp.resource.get_absolute_location("c", "c", "cavity_bottom")
       radius = _effective_radius(asp.resource)
 
@@ -1707,8 +1706,9 @@ class PrepPIPBackend(PIPBackend):
     Returns:
       List of Coordinate, one per channel.
     """
-    resp_obj: object = await self._driver.send_command(PrepCmd.PrepGetPositions(), raise_on_error=False)
-    if resp_obj is None:
+    try:
+      resp_obj = await self._driver.send_command(PrepCmd.PrepGetPositions())
+    except (HoiError, ChannelizedError):
       return []
     if not isinstance(resp_obj, PrepCmd.PrepGetPositions.Response):
       return []
@@ -1844,15 +1844,8 @@ class PrepPIPBackend(PIPBackend):
     tip_presence = await self.sense_tip_presence()
     if channel_idx < len(tip_presence) and tip_presence[channel_idx]:
       # Query firmware for the held tip definition to get tip length
-      Cmd = type(
-        "_GetTipDefHeld",
-        (PrepCmd.PrepStatusRequest,),
-        cast(
-          dict[str, Any],
-          {"command_id": 13, "__annotations__": {"dest": Address}},
-        ),
-      )
-      raw = await self._driver.send_command(Cmd(), return_raw=True, raise_on_error=False)
+      pipettor_addr = await self._driver.resolve_path(PIPETTOR_OBJECT_PATH)
+      raw = await self._driver.send_query(PrepCmd.PrepProbeRequest(dest=pipettor_addr, command_id=13))
       if raw is not None:
         import struct as _struct
 
@@ -1960,15 +1953,7 @@ class PrepPIPBackend(PIPBackend):
 
     results: list[bool] = []
     for addr in drive_map.sleeve_sensor_addrs:
-      Cmd = type(
-        "_GetTipPresent",
-        (PrepCmd.PrepStatusRequest,),
-        cast(
-          dict[str, Any],
-          {"command_id": 15, "__annotations__": {"dest": Address}},
-        ),
-      )
-      raw = await self._driver.send_command(Cmd(dest=addr), return_raw=True, raise_on_error=False)
+      raw = await self._driver.send_query(PrepCmd.PrepProbeRequest(dest=addr, command_id=15))
       if raw is None or len(raw[0]) < 8:
         results.append(False)
       else:

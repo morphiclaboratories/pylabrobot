@@ -81,19 +81,17 @@ class HamiltonTCPIntrospectionBackend(Protocol):
   @property
   def registry(self) -> ObjectRegistry: ...
 
-  def get_root_object_addresses(self) -> list[Address]: ...
-
   @property
   def global_object_addresses(self) -> Sequence[Address]: ...
 
-  async def send_command(
-    self,
-    command: TCPCommand,
-    *,
-    ensure_connection: bool = True,
-    return_raw: bool = False,
-    raise_on_error: bool = True,
-    read_timeout: Optional[float] = None,
+  async def send_command(self, command: TCPCommand, *, read_timeout: Optional[float] = None) -> Any: ...
+
+  async def send_query(
+    self, command: TCPCommand, *, read_timeout: Optional[float] = None
+  ) -> Optional[tuple]: ...
+
+  async def send_discovery_command(
+    self, command: TCPCommand, *, read_timeout: Optional[float] = None
   ) -> Any: ...
 
 
@@ -148,80 +146,86 @@ def resolve_type_id(type_id: int) -> str:
 # ============================================================================
 # INTROSPECTION TYPE MAPPING (2D table from HoiObject.mHoiParamTypes)
 # ============================================================================
-# Introspection type IDs are separate from HamiltonDataType wire encoding types.
+# Introspection type IDs are a unique interface-0 typing system, distinct from
+# the standard HamiltonDataType wire-encoding type IDs.
 # Rows = firmware scalar or array kinds; columns = In, Out, InOut, RetVal
 # (HoiParameterType.Direction). Source: vendor protocol reference mHoiParamTypes[31,4].
 
 
 @dataclass(frozen=True)
 class _HoiTypeRow:
-  """One row in vendor mHoiParamTypes[31,4] with readable display metadata."""
+  """One row in vendor mHoiParamTypes[31,4] with readable display metadata.
 
-  dotnet_name: str
+  ``ids`` always follows the interface-0 type table column order:
+  ``(In, Out, InOut, RetVal)``. These columns are specific to the firmware's
+  interface-0 HOI type system, a unique typing scheme separate from the
+  standard ``HamiltonDataType`` wire type IDs.
+
+  ``is_complex``: type requires additional source_id/ref_id bytes in method param encoding.
+  ``is_struct_kind``: type references a struct definition (subset of complex).
+  ``is_enum_kind``: type references an enum definition (subset of complex).
+  """
+
   display_name: str
-  ids: tuple[int, int, int, int]  # [In, Out, InOut, RetVal]
+  ids: tuple[int, int, int, int]  # Interface-0 column order: [In, Out, InOut, RetVal]
+  is_complex: bool = False
+  is_struct_kind: bool = False
+  is_enum_kind: bool = False
 
 
 _HOI_TYPE_ROWS: tuple[_HoiTypeRow, ...] = (
-  _HoiTypeRow("i8", "i8", (1, 17, 9, 25)),
-  _HoiTypeRow("i16", "i16", (3, 19, 11, 27)),
-  _HoiTypeRow("i32", "i32", (5, 21, 13, 29)),
-  _HoiTypeRow("u8", "u8", (2, 18, 10, 26)),
-  _HoiTypeRow("u16", "u16", (4, 20, 12, 28)),
-  _HoiTypeRow("u32", "u32", (6, 22, 14, 30)),
-  _HoiTypeRow("str", "str", (7, 23, 15, 31)),
-  _HoiTypeRow("bool", "bool", (33, 35, 34, 36)),
-  _HoiTypeRow("i8[]", "List[i8]", (37, 39, 38, 40)),
-  _HoiTypeRow("i16[]", "List[i16]", (41, 43, 42, 44)),
-  _HoiTypeRow("i32[]", "List[i32]", (49, 51, 50, 52)),
-  _HoiTypeRow("u8[]", "bytes", (8, 24, 16, 32)),
-  _HoiTypeRow("u16[]", "List[u16]", (45, 47, 46, 48)),
-  _HoiTypeRow("u32[]", "List[u32]", (53, 55, 54, 56)),
-  _HoiTypeRow("bool[]", "List[bool]", (66, 68, 67, 69)),
-  _HoiTypeRow("HcResult", "HcResult", (70, 72, 71, 73)),
-  _HoiTypeRow("struct", "struct", (57, 59, 58, 60)),
-  _HoiTypeRow("struct[]", "List[struct]", (61, 63, 62, 64)),
-  _HoiTypeRow("str[]", "List[str]", (74, 76, 75, 77)),
-  _HoiTypeRow("enum", "enum", (78, 80, 79, 81)),
-  _HoiTypeRow("enum[]", "List[enum]", (82, 84, 83, 85)),
-  _HoiTypeRow("i64", "i64", (86, 88, 87, 89)),
-  _HoiTypeRow("u64", "u64", (90, 92, 91, 93)),
-  _HoiTypeRow("f32", "f32", (94, 96, 95, 97)),
-  _HoiTypeRow("f64", "f64", (98, 100, 99, 101)),
-  _HoiTypeRow("i64[]", "List[i64]", (102, 104, 103, 105)),
-  _HoiTypeRow("u64[]", "List[u64]", (106, 108, 107, 109)),
-  _HoiTypeRow("f32[]", "List[f32]", (110, 112, 111, 113)),
-  _HoiTypeRow("f64[]", "List[f64]", (114, 116, 115, 117)),
-  _HoiTypeRow("HoiResult", "HoiResult", (118, 120, 119, 121)),
-  _HoiTypeRow("padding", "padding", (0, 0, 0, 0)),
-)
-
-_COMPLEX_METHOD_ROW_NAMES = frozenset(
-  {
-    "HcResult",
-    "struct",
-    "struct[]",
-    "str[]",
-    "enum",
-    "enum[]",
-    "HoiResult",
-  }
+  _HoiTypeRow("i8", (1, 17, 9, 25)),
+  _HoiTypeRow("i16", (3, 19, 11, 27)),
+  _HoiTypeRow("i32", (5, 21, 13, 29)),
+  _HoiTypeRow("u8", (2, 18, 10, 26)),
+  _HoiTypeRow("u16", (4, 20, 12, 28)),
+  _HoiTypeRow("u32", (6, 22, 14, 30)),
+  _HoiTypeRow("str", (7, 23, 15, 31)),
+  _HoiTypeRow("bool", (33, 35, 34, 36)),
+  _HoiTypeRow("List[i8]", (37, 39, 38, 40)),
+  _HoiTypeRow("List[i16]", (41, 43, 42, 44)),
+  _HoiTypeRow("List[i32]", (49, 51, 50, 52)),
+  _HoiTypeRow("bytes", (8, 24, 16, 32)),
+  _HoiTypeRow("List[u16]", (45, 47, 46, 48)),
+  _HoiTypeRow("List[u32]", (53, 55, 54, 56)),
+  _HoiTypeRow("List[bool]", (66, 68, 67, 69)),
+  _HoiTypeRow("HcResult", (70, 72, 71, 73), is_complex=True),
+  _HoiTypeRow("struct", (57, 59, 58, 60), is_complex=True, is_struct_kind=True),
+  _HoiTypeRow("List[struct]", (61, 63, 62, 64), is_complex=True, is_struct_kind=True),
+  _HoiTypeRow("List[str]", (74, 76, 75, 77), is_complex=True),
+  _HoiTypeRow("enum", (78, 80, 79, 81), is_complex=True, is_enum_kind=True),
+  _HoiTypeRow("List[enum]", (82, 84, 83, 85), is_complex=True, is_enum_kind=True),
+  _HoiTypeRow("i64", (86, 88, 87, 89)),
+  _HoiTypeRow("u64", (90, 92, 91, 93)),
+  _HoiTypeRow("f32", (94, 96, 95, 97)),
+  _HoiTypeRow("f64", (98, 100, 99, 101)),
+  _HoiTypeRow("List[i64]", (102, 104, 103, 105)),
+  _HoiTypeRow("List[u64]", (106, 108, 107, 109)),
+  _HoiTypeRow("List[f32]", (110, 112, 111, 113)),
+  _HoiTypeRow("List[f64]", (114, 116, 115, 117)),
+  _HoiTypeRow("HoiResult", (118, 120, 119, 121), is_complex=True),
+  _HoiTypeRow("padding", (0, 0, 0, 0)),
 )
 
 _HOI_PARAM_DIRECTION: tuple[str, ...] = ("In", "Out", "InOut", "RetVal")
 
 
-def _build_introspection_maps() -> tuple[
-  dict[int, str],
-  set[int],
-  set[int],
-  set[int],
-  frozenset[int],
-  frozenset[int],
-  frozenset[int],
-  frozenset[int],
-  frozenset[int],
-]:
+@dataclass(frozen=True)
+class _IntrospectionTypeMaps:
+  """Derived classification maps built once from :data:`_HOI_TYPE_ROWS` at import time."""
+
+  type_names: dict[int, str]
+  argument_type_ids: frozenset[int]
+  return_element_type_ids: frozenset[int]
+  return_value_type_ids: frozenset[int]
+  complex_method_type_ids: frozenset[int]
+  complex_struct_type_ids: frozenset[int]
+  struct_ref_type_ids: frozenset[int]
+  enum_ref_type_ids: frozenset[int]
+  all_complex_type_ids: frozenset[int]
+
+
+def _build_introspection_maps() -> _IntrospectionTypeMaps:
   names: dict[int, str] = {0: "void"}
   arg_ids: set[int] = set()
   ret_el_ids: set[int] = set()
@@ -241,49 +245,52 @@ def _build_introspection_maps() -> tuple[
         ret_el_ids.add(tid)
       elif ci == 3:
         ret_val_ids.add(tid)
-      if row.dotnet_name in _COMPLEX_METHOD_ROW_NAMES:
+      if row.is_complex:
         complex_method_ids.add(tid)
-      if row.dotnet_name in ("struct", "struct[]"):
+      if row.is_struct_kind:
         struct_ref_ids.add(tid)
-      if row.dotnet_name in ("enum", "enum[]"):
+      if row.is_enum_kind:
         enum_ref_ids.add(tid)
 
-  # GetStructs sentinels (Parameter.ParameterTypes values): STRUCTURE=30, STRUCT_ARRAY=31,
-  # ENUM=32, ENUM_ARRAY=35. Not in _HOI_TYPE_ROWS — they live in the GetStructs wire format only.
-  _COMPLEX_STRUCT = frozenset({30, 31, 32, 35})
-  struct_ref_ids |= {30, 31}
-  enum_ref_ids |= {32, 35}
+  # GetStructs sentinels (Parameter.ParameterTypes values) — live in the GetStructs wire format
+  # only, not in _HOI_TYPE_ROWS.
+  complex_struct = frozenset({
+    HamiltonDataType.STRUCTURE,
+    HamiltonDataType.STRUCTURE_ARRAY,
+    HamiltonDataType.ENUM,
+    HamiltonDataType.ENUM_ARRAY,
+  })
+  struct_ref_ids |= {HamiltonDataType.STRUCTURE, HamiltonDataType.STRUCTURE_ARRAY}
+  enum_ref_ids |= {HamiltonDataType.ENUM, HamiltonDataType.ENUM_ARRAY}
 
-  all_complex = frozenset(complex_method_ids | _COMPLEX_STRUCT)
-  return (
-    names,
-    arg_ids,
-    ret_el_ids,
-    ret_val_ids,
-    frozenset(complex_method_ids),
-    _COMPLEX_STRUCT,
-    frozenset(struct_ref_ids),
-    frozenset(enum_ref_ids),
-    all_complex,
+  # Empirical: type_id=113 (List[f32] column 3 = RetVal) appears as Argument on some firmware.
+  # TODO: Re-validate against hardware captures and remove if no longer observed.
+  names[113] = "List[f32] [In] (empirical)"
+  arg_ids.add(113)
+
+  return _IntrospectionTypeMaps(
+    type_names=names,
+    argument_type_ids=frozenset(arg_ids),
+    return_element_type_ids=frozenset(ret_el_ids),
+    return_value_type_ids=frozenset(ret_val_ids),
+    complex_method_type_ids=frozenset(complex_method_ids),
+    complex_struct_type_ids=complex_struct,
+    struct_ref_type_ids=frozenset(struct_ref_ids),
+    enum_ref_type_ids=frozenset(enum_ref_ids),
+    all_complex_type_ids=frozenset(complex_method_ids | complex_struct),
   )
 
 
-(
-  _INTROSPECTION_TYPE_NAMES,
-  _ARGUMENT_TYPE_IDS,
-  _RETURN_ELEMENT_TYPE_IDS,
-  _RETURN_VALUE_TYPE_IDS,
-  _COMPLEX_METHOD_TYPE_IDS,
-  _COMPLEX_STRUCT_TYPE_IDS,
-  _STRUCT_REF_TYPE_IDS,
-  _ENUM_REF_TYPE_IDS,
-  _ALL_COMPLEX_TYPE_IDS,
-) = _build_introspection_maps()
-
-# Empirical device behavior: type_id=113 appears as Argument on some firmware,
-# despite the static grid column implying RetVal.
-_INTROSPECTION_TYPE_NAMES[113] = "List[f32] [In] (empirical)"  # TODO: Re-validate or remove
-_ARGUMENT_TYPE_IDS.add(113)
+_MAPS = _build_introspection_maps()
+_INTROSPECTION_TYPE_NAMES = _MAPS.type_names
+_ARGUMENT_TYPE_IDS = _MAPS.argument_type_ids
+_RETURN_ELEMENT_TYPE_IDS = _MAPS.return_element_type_ids
+_RETURN_VALUE_TYPE_IDS = _MAPS.return_value_type_ids
+_COMPLEX_METHOD_TYPE_IDS = _MAPS.complex_method_type_ids
+_COMPLEX_STRUCT_TYPE_IDS = _MAPS.complex_struct_type_ids
+_STRUCT_REF_TYPE_IDS = _MAPS.struct_ref_type_ids
+_ENUM_REF_TYPE_IDS = _MAPS.enum_ref_type_ids
+_ALL_COMPLEX_TYPE_IDS = _MAPS.all_complex_type_ids
 
 
 def get_introspection_type_category(type_id: int) -> str:
@@ -343,13 +350,13 @@ class ObjectRegistry:
   def __init__(self):
     self._objects: Dict[str, ObjectInfo] = {}
     self._address_to_path: Dict[Address, str] = {}
-    self._root_addresses: List[Address] = []
+    self._root_address: Optional[Address] = None
 
-  def set_root_addresses(self, addresses: List[Address]) -> None:
-    self._root_addresses = list(addresses)
+  def set_root_address(self, address: Address) -> None:
+    self._root_address = address
 
-  def get_root_addresses(self) -> List[Address]:
-    return list(self._root_addresses)
+  def get_root_address(self) -> Optional[Address]:
+    return self._root_address
 
   def register(self, path: str, obj: ObjectInfo) -> None:
     self._objects[path] = obj
@@ -402,18 +409,16 @@ class FirmwareTreeNode:
 
 @dataclass
 class FirmwareTree:
-  """Structured firmware tree produced by introspection traversal."""
+  """Structured firmware tree produced by introspection traversal.
 
-  roots: List[FirmwareTreeNode] = field(default_factory=list)
+  Both Prep and Nimbus expose exactly one root object; the single-root
+  invariant is enforced at discovery time in the TCP client.
+  """
+
+  root: FirmwareTreeNode
 
   def format(self) -> str:
-    if not self.roots:
-      return "<empty firmware tree>"
-    lines: List[str] = []
-    for idx, root in enumerate(self.roots):
-      root_is_last = idx == len(self.roots) - 1
-      lines.extend(root.format_lines(prefix="", is_last=root_is_last, is_root=True))
-    return "\n".join(lines)
+    return "\n".join(self.root.format_lines(prefix="", is_last=True, is_root=True))
 
   def __str__(self) -> str:
     return self.format()
@@ -422,7 +427,7 @@ class FirmwareTree:
 def flatten_firmware_tree(tree: FirmwareTree) -> List[Tuple[str, Address, ObjectInfo]]:
   """Preorder flattening of :class:`FirmwareTree` for path-keyed lookups.
 
-  Returns ``(dot_path, address, object_info)`` for each node (roots first, DFS).
+  Returns ``(dot_path, address, object_info)`` for each node (root first, DFS).
   """
   out: List[Tuple[str, Address, ObjectInfo]] = []
 
@@ -431,8 +436,7 @@ def flatten_firmware_tree(tree: FirmwareTree) -> List[Tuple[str, Address, Object
     for child in node.children:
       walk(child)
 
-  for root in tree.roots:
-    walk(root)
+  walk(tree.root)
   return out
 
 
@@ -944,13 +948,13 @@ _NETWORK_STRUCTS[3] = StructInfo(
   struct_id=3,
   name="DateTime",
   fields={
-    "year": ParameterType(type_id=5),  # U16
-    "month": ParameterType(type_id=4),  # U8 (padded)
-    "day": ParameterType(type_id=4),
-    "hour": ParameterType(type_id=4),
-    "minute": ParameterType(type_id=4),
-    "second": ParameterType(type_id=4),
-    "millisecond": ParameterType(type_id=5),  # U16
+    "year": ParameterType(type_id=HamiltonDataType.U16),
+    "month": ParameterType(type_id=HamiltonDataType.U8),
+    "day": ParameterType(type_id=HamiltonDataType.U8),
+    "hour": ParameterType(type_id=HamiltonDataType.U8),
+    "minute": ParameterType(type_id=HamiltonDataType.U8),
+    "second": ParameterType(type_id=HamiltonDataType.U8),
+    "millisecond": ParameterType(type_id=HamiltonDataType.U16),
   },
   interface_id=3,
 )
@@ -1080,7 +1084,7 @@ class GetMethodCommand(TCPCommand):
 
   def build_parameters(self) -> HoiParams:
     """Build parameters for get_method command."""
-    return HoiParams().add(self.method_index, U32)
+    return HoiParams().u32(self.method_index)
 
   @classmethod
   def parse_response_parameters(cls, data: bytes) -> dict:
@@ -1167,7 +1171,7 @@ class GetSubobjectAddressCommand(TCPCommand):
 
   def build_parameters(self) -> HoiParams:
     """Build parameters for get_subobject_address command."""
-    return HoiParams().add(self.subobject_index, U16)
+    return HoiParams().u16(self.subobject_index)
 
   @dataclass(frozen=True)
   class Response:
@@ -1217,7 +1221,7 @@ class GetEnumsCommand(TCPCommand):
 
   def build_parameters(self) -> HoiParams:
     """Build parameters for get_enums command."""
-    return HoiParams().add(self.target_interface_id, U8)
+    return HoiParams().u8(self.target_interface_id)
 
   @dataclass(frozen=True)
   class Response:
@@ -1241,7 +1245,7 @@ class GetStructsCommand(TCPCommand):
 
   def build_parameters(self) -> HoiParams:
     """Build parameters for get_structs command."""
-    return HoiParams().add(self.target_interface_id, U8)
+    return HoiParams().u8(self.target_interface_id)
 
   @dataclass(frozen=True)
   class Response:
@@ -1616,11 +1620,10 @@ class HamiltonIntrospection:
     if not parts:
       raise KeyError(f"Invalid path: '{path}'")
 
-    roots = self.backend.get_root_object_addresses()
-    if not roots:
-      raise KeyError(f"No root addresses; cannot resolve path '{path}'")
+    root_addr = self.backend.registry.get_root_address()
+    if root_addr is None:
+      raise KeyError(f"No root address registered; cannot resolve path '{path}'")
 
-    root_addr = roots[0]
     root_obj = await self.get_object(root_addr)
     self.backend.registry.register(root_obj.name, root_obj)
     if root_obj.name != parts[0]:
@@ -1660,18 +1663,16 @@ class HamiltonIntrospection:
     return current_addr
 
   async def _build_firmware_tree(self) -> FirmwareTree:
-    """Build a DFS firmware tree from all discovered root addresses."""
-    roots = self.backend.get_root_object_addresses()
-    tree = FirmwareTree()
-    if not roots:
-      return tree
+    """Build a DFS firmware tree from the single registered root address."""
+    root_addr = self.backend.registry.get_root_address()
+    if root_addr is None:
+      raise RuntimeError("Cannot build firmware tree: no root address registered")
 
     visited: Set[Address] = set()
-    for addr in roots:
-      node = await self._walk_node(addr, None, visited)
-      if node is not None:
-        tree.roots.append(node)
-    return tree
+    node = await self._walk_node(root_addr, None, visited)
+    if node is None:
+      raise RuntimeError(f"Root node walk returned None for address {root_addr}")
+    return FirmwareTree(root=node)
 
   async def get_firmware_tree(self, refresh: bool = False) -> FirmwareTree:
     """Return cached firmware tree, or build and cache it when missing."""
@@ -1718,7 +1719,7 @@ class HamiltonIntrospection:
       Object metadata
     """
     command = GetObjectCommand(address)
-    response = await self.backend.send_command(command, ensure_connection=False)
+    response = await self.backend.send_discovery_command(command)
     if response is None:
       raise RuntimeError("GetObjectCommand returned None")
 
@@ -1741,7 +1742,7 @@ class HamiltonIntrospection:
       Method signature
     """
     command = GetMethodCommand(address, method_index)
-    response = await self.backend.send_command(command, ensure_connection=False)
+    response = await self.backend.send_discovery_command(command)
 
     return MethodInfo(
       interface_id=response["interface_id"],
@@ -1765,7 +1766,7 @@ class HamiltonIntrospection:
       Subobject address
     """
     command = GetSubobjectAddressCommand(address, subobject_index)
-    response = await self.backend.send_command(command, ensure_connection=False)
+    response = await self.backend.send_discovery_command(command)
     if response is None:
       raise RuntimeError("GetSubobjectAddressCommand returned None")
 
@@ -1800,7 +1801,7 @@ class HamiltonIntrospection:
       )
       return []
     command = GetInterfacesCommand(address)
-    response = await self.backend.send_command(command, ensure_connection=False)
+    response = await self.backend.send_discovery_command(command)
     if response is None:
       raise RuntimeError("GetInterfacesCommand returned None")
 
@@ -1832,7 +1833,7 @@ class HamiltonIntrospection:
       List of enum definitions
     """
     command = GetEnumsCommand(address, interface_id)
-    response = await self.backend.send_command(command, ensure_connection=False)
+    response = await self.backend.send_discovery_command(command)
     if response is None:
       raise RuntimeError("GetEnumsCommand returned None")
 
@@ -1854,7 +1855,7 @@ class HamiltonIntrospection:
       offset += cnt
     return result
 
-  async def get_structs_raw(self, address: Address, interface_id: int) -> tuple[bytes, List[dict]]:
+  async def _get_structs_raw(self, address: Address, interface_id: int) -> tuple[bytes, List[dict]]:
     """Get raw GetStructs response bytes and a fragment-by-fragment breakdown.
 
     Use this to see exactly what the device sends so response parsing can
@@ -1866,7 +1867,7 @@ class HamiltonIntrospection:
         print(f\"{i}: type_id={f['type_id']} len={f['length']} decoded={f['decoded']!r}\")
     """
     command = GetStructsCommand(address, interface_id)
-    result = await self.backend.send_command(command, ensure_connection=False, return_raw=True)
+    result = await self.backend.send_query(command)
     (params,) = result
     return params, inspect_hoi_params(params)
 
@@ -1890,7 +1891,7 @@ class HamiltonIntrospection:
       List of struct definitions
     """
     command = GetStructsCommand(address, interface_id)
-    response = await self.backend.send_command(command, ensure_connection=False)
+    response = await self.backend.send_discovery_command(command)
     if response is None:
       raise RuntimeError("GetStructsCommand returned None")
 

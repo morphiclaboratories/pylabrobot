@@ -10,13 +10,8 @@ from pylabrobot.hamilton.liquid_handlers.nimbus.driver import (
   NimbusResolvedInterfaces,
   nimbus_interface_specs_for_root,
 )
-from pylabrobot.hamilton.tcp.error_tables import NIMBUS_ERROR_CODES
 from pylabrobot.hamilton.tcp.interface_bundle import InterfacePathSpec, resolve_interface_path_specs
 from pylabrobot.hamilton.tcp.packets import Address
-
-# Stable key from NIMBUS_ERROR_CODES for merge-override tests (must exist in table).
-_NIMBUS_OVERRIDE_KEY = (0x0001, 0x0001, 0x0101, 1, 0x0F01)
-_NIMBUS_OTHER_KEY = (0x0001, 0x0001, 0x0101, 1, 0x0F02)
 
 
 def test_chatterbox_setup_and_command_roundtrip():
@@ -29,9 +24,6 @@ def test_chatterbox_setup_and_command_roundtrip():
 
     response = await driver.send_command(
       GetChannelConfiguration_1(driver.nimbus_core_address),
-      ensure_connection=False,
-      return_raw=False,
-      raise_on_error=False,
       read_timeout=0.1,
     )
     assert response == {"channels": 8}
@@ -67,19 +59,6 @@ def test_assert_required_methods_missing_raises():
 
   asyncio.run(_run())
 
-
-def test_nimbus_driver_error_codes_user_values_override_table():
-  """NimbusDriver merges NIMBUS_ERROR_CODES with caller dict; same-key entries use the caller.
-
-  Covers the __init__ merge policy used for instrument-specific error enrichment, not
-  exercised elsewhere (tcp_tests do not assert Nimbus defaults).
-  """
-  driver = NimbusDriver(
-    host="127.0.0.1",
-    error_codes={_NIMBUS_OVERRIDE_KEY: "custom text for tests"},
-  )
-  assert driver._error_codes[_NIMBUS_OVERRIDE_KEY] == "custom text for tests"
-  assert driver._error_codes[_NIMBUS_OTHER_KEY] == NIMBUS_ERROR_CODES[_NIMBUS_OTHER_KEY]
 
 
 def test_nimbus_core_address_raises_before_setup():

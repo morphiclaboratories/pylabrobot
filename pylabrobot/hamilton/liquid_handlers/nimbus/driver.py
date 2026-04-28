@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Set, Tuple
+from typing import Dict, Mapping, Optional, Set
 
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.hamilton.tcp.client import HamiltonTCPClient
@@ -66,6 +66,8 @@ class NimbusDriver(HamiltonTCPClient):
   manages the PIP backend and door subsystem.
   """
 
+  _ERROR_CODES = NIMBUS_ERROR_CODES
+
   _REQUIRED_METHODS_CORE: Set[int] = {
     3,
     14,
@@ -94,9 +96,7 @@ class NimbusDriver(HamiltonTCPClient):
     auto_reconnect: bool = True,
     max_reconnect_attempts: int = 3,
     connection_timeout: int = 600,
-    error_codes: Optional[Dict[Tuple[int, int, int, int, int], str]] = None,
   ):
-    merged_error_codes = {**NIMBUS_ERROR_CODES, **(error_codes or {})}
     super().__init__(
       host=host,
       port=port,
@@ -105,7 +105,6 @@ class NimbusDriver(HamiltonTCPClient):
       auto_reconnect=auto_reconnect,
       max_reconnect_attempts=max_reconnect_attempts,
       connection_timeout=connection_timeout,
-      error_codes=merged_error_codes,
     )
 
     self._nimbus_core_address: Optional[Address] = None

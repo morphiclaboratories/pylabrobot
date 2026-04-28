@@ -6,7 +6,7 @@ else uses :meth:`HamiltonTCPClient.resolve_path`, which consults the introspecti
 registry (cache-hot after the first hit).
 
 **JIT command targets.** Concrete :class:`~pylabrobot.hamilton.liquid_handlers.prep.prep_commands.PrepCommand`
-subclasses declare ``firmware_path``; :meth:`PrepDriver.send_command` resolves
+subclasses declare ``firmware_path``; :meth:`PrepDriver._send_raw` resolves
 that path when ``dest`` is the unresolved sentinel. No parallel path tables on
 backends.
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.hamilton.tcp.client import HamiltonTCPClient
@@ -65,6 +65,8 @@ class PrepDriver(HamiltonTCPClient):
   commands.
   """
 
+  _ERROR_CODES = PREP_ERROR_CODES
+
   def __init__(
     self,
     host: str,
@@ -74,9 +76,7 @@ class PrepDriver(HamiltonTCPClient):
     auto_reconnect: bool = True,
     max_reconnect_attempts: int = 3,
     connection_timeout: int = 600,
-    error_codes: Optional[Dict[Tuple[int, int, int, int, int], str]] = None,
   ):
-    merged = {**PREP_ERROR_CODES, **(error_codes or {})}
     super().__init__(
       host=host,
       port=port,
@@ -85,7 +85,6 @@ class PrepDriver(HamiltonTCPClient):
       auto_reconnect=auto_reconnect,
       max_reconnect_attempts=max_reconnect_attempts,
       connection_timeout=connection_timeout,
-      error_codes=merged,
     )
     self._mlprep_address: Optional[Address] = None
 
@@ -134,12 +133,13 @@ class PrepDriver(HamiltonTCPClient):
   # JIT firmware-path resolution for PrepCommand.dest
   # ---------------------------------------------------------------------------
 
-  async def send_command(
+  async def _send_raw(
     self,
     command: TCPCommand,
-    ensure_connection: bool = True,
-    return_raw: bool = False,
-    raise_on_error: bool = True,
+    *,
+    ensure_connection: bool,
+    return_raw: bool,
+    raise_on_error: bool,
     read_timeout: Optional[float] = None,
   ) -> Any:
     if isinstance(command, PrepCommand) and command.dest == _UNRESOLVED:
@@ -148,7 +148,7 @@ class PrepDriver(HamiltonTCPClient):
         raise RuntimeError(
           f"{type(command).__name__} has no firmware_path declared and no "
           "explicit dest= supplied at construction. Polymorphic-dest commands "
-          "must pass dest= to send_command."
+          "must pass dest= to send_query or send_command."
         )
       try:
         addr = await self.resolve_path(path)
@@ -159,7 +159,7 @@ class PrepDriver(HamiltonTCPClient):
         ) from exc
       command.dest = addr
       command.dest_address = addr
-    return await super().send_command(
+    return await super()._send_raw(
       command,
       ensure_connection=ensure_connection,
       return_raw=return_raw,
@@ -210,9 +210,7 @@ class PrepDriver(HamiltonTCPClient):
       "__annotations__": {"dest": Address},
     }
     Cmd = type("_FWQuery", (PrepCmd.PrepStatusRequest,), ns)
-    raw_resp: object = await self.send_command(
-      Cmd(dest=addr), return_raw=True, raise_on_error=False
-    )
+    raw_resp: object = await self.send_query(Cmd(dest=addr))
     if raw_resp is None:
       return self._decode_firmware_string(None)
     if not isinstance(raw_resp, tuple):

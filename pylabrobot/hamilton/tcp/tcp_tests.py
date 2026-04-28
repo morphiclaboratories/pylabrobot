@@ -312,7 +312,7 @@ class TestTransportApiAlignment(unittest.TestCase):
     )
     self.assertEqual(got, Address(1, 1, 999))
 
-  def test_send_command_return_raw_returns_hoi_payload_tuple(self):
+  def test_send_query_returns_hoi_payload_tuple(self):
     class Cmd(TCPCommand):
       protocol = HamiltonProtocol.OBJECT_DISCOVERY
       interface_id = 0
@@ -340,7 +340,7 @@ class TestTransportApiAlignment(unittest.TestCase):
 
     client = FakeClient(host="127.0.0.1", port=0)
     client.client_address = Address(2, 1, 65535)
-    raw = asyncio.run(client.send_command(Cmd(Address(1, 1, 257)), return_raw=True))
+    raw = asyncio.run(client.send_query(Cmd(Address(1, 1, 257))))
     assert raw is not None
     self.assertIsInstance(raw, tuple)
     self.assertEqual(raw[0], HoiParams().add(123, I32).build())
@@ -349,8 +349,7 @@ class TestTransportApiAlignment(unittest.TestCase):
     class Backend:
       def __init__(self):
         self._registry = ObjectRegistry()
-        self._registry.set_root_addresses([Address(1, 1, 100)])
-        self._discovered_objects = {"root": [Address(1, 1, 100)]}
+        self._registry.set_root_address(Address(1, 1, 100))
         self._fw_cache = None
         self._global_object_addresses = ()
 
@@ -362,9 +361,6 @@ class TestTransportApiAlignment(unittest.TestCase):
       def global_object_addresses(self):
         return self._global_object_addresses
 
-      def get_root_object_addresses(self):
-        return self._registry.get_root_addresses() or list(self._discovered_objects.get("root", []))
-
       def get_firmware_tree_cache(self):
         return self._fw_cache
 
@@ -372,6 +368,12 @@ class TestTransportApiAlignment(unittest.TestCase):
         self._fw_cache = tree
 
       async def send_command(self, *a, **k):
+        raise RuntimeError("unused in this test")
+
+      async def send_query(self, *a, **k):
+        raise RuntimeError("unused in this test")
+
+      async def send_discovery_command(self, *a, **k):
         raise RuntimeError("unused in this test")
 
       async def resolve_path(self, path: str):
@@ -410,9 +412,8 @@ class TestTransportApiAlignment(unittest.TestCase):
 
     self.assertIs(t1, t2)
     self.assertIsNot(t1, t3)
-    self.assertEqual(len(t1.roots), 1)
-    self.assertEqual(t1.roots[0].path, "Root")
-    self.assertEqual(len(t1.roots[0].children), 1)
+    self.assertEqual(t1.root.path, "Root")
+    self.assertEqual(len(t1.root.children), 1)
     self.assertIn("Root.Child", str(t1))
     self.assertGreaterEqual(counts["obj"], 4)  # built twice (initial + refresh)
     self.assertGreaterEqual(counts["sub"], 2)
@@ -421,22 +422,22 @@ class TestTransportApiAlignment(unittest.TestCase):
     a0 = Address(1, 1, 10)
     a1 = Address(1, 1, 11)
     a2 = Address(1, 1, 12)
-    o0 = ObjectInfo(name="root", version="v", method_count=1, subobject_count=1, address=a0)
+    o0 = ObjectInfo(name="root", version="v", method_count=1, subobject_count=2, address=a0)
     o1 = ObjectInfo(name="child", version="v", method_count=1, subobject_count=0, address=a1)
     o2 = ObjectInfo(name="other", version="v", method_count=1, subobject_count=0, address=a2)
-    child = FirmwareTreeNode(path="R.c", address=a1, object_info=o1, children=[])
-    root = FirmwareTreeNode(path="R", address=a0, object_info=o0, children=[child])
-    other_root = FirmwareTreeNode(path="S", address=a2, object_info=o2, children=[])
-    tree = FirmwareTree(roots=[root, other_root])
+    c1 = FirmwareTreeNode(path="R.child", address=a1, object_info=o1, children=[])
+    c2 = FirmwareTreeNode(path="R.other", address=a2, object_info=o2, children=[])
+    root = FirmwareTreeNode(path="R", address=a0, object_info=o0, children=[c1, c2])
+    tree = FirmwareTree(root=root)
     flat = flatten_firmware_tree(tree)
-    self.assertEqual([p for p, _, _ in flat], ["R", "R.c", "S"])
+    self.assertEqual([p for p, _, _ in flat], ["R", "R.child", "R.other"])
 
   def test_get_firmware_tree_flat_delegates_to_flatten(self):
     client = HamiltonTCPClient(host="127.0.0.1", port=0)
     a0 = Address(1, 1, 20)
     o0 = ObjectInfo(name="only", version="v", method_count=0, subobject_count=0, address=a0)
     root = FirmwareTreeNode(path="Only", address=a0, object_info=o0, children=[])
-    tree = FirmwareTree(roots=[root])
+    tree = FirmwareTree(root=root)
 
     async def fake_get_firmware_tree(refresh: bool = False):
       del refresh
@@ -685,7 +686,10 @@ class TestHcResultDescriptionNimbusTable(unittest.IsolatedAsyncioTestCase):
   """NIMBUS_ERROR_CODES keys use interface_id in the 4th slot; describe_entry must match that."""
 
   async def test_lookup_uses_interface_id_not_method_id(self):
-    client = HamiltonTCPClient(host="127.0.0.1", port=0, error_codes=NIMBUS_ERROR_CODES)
+    class _NimbusClient(HamiltonTCPClient):
+      _ERROR_CODES = NIMBUS_ERROR_CODES
+
+    client = _NimbusClient(host="127.0.0.1", port=0)
     client.introspection.get_interface_name = AsyncMock(return_value="Pipette")  # type: ignore[method-assign]
     client.introspection.get_hc_result_text = AsyncMock(return_value=None)  # type: ignore[method-assign]
     helper = _HcResultDescriptionHelper(client)
@@ -752,7 +756,7 @@ class TestIntrospectionTypeGridInvariants(unittest.TestCase):
     empirical_argument_ids = {113}
     for row in introspection_mod._HOI_TYPE_ROWS:
       in_id, out_id, inout_id, retval_id = row.ids
-      if row.ids == (0, 0, 0, 0):
+      if row.ids == (0, 0, 0, 0):  # padding row
         continue
       for tid in (in_id, out_id, inout_id, retval_id):
         if tid == 0:
@@ -771,9 +775,14 @@ class TestIntrospectionTypeGridInvariants(unittest.TestCase):
 
 
 class TestIntrospectionTypeSetsAndClassification(unittest.TestCase):
-  def _row_ids(self, dotnet_name: str) -> tuple[int, int, int, int]:
-    row = next(r for r in introspection_mod._HOI_TYPE_ROWS if r.dotnet_name == dotnet_name)
-    return row.ids
+  @staticmethod
+  def _ids_for_flag(flag: str) -> tuple[int, ...]:
+    """Collect all IDs from rows matching a boolean flag (is_struct_kind, is_enum_kind, etc.)."""
+    ids: list[int] = []
+    for row in introspection_mod._HOI_TYPE_ROWS:
+      if getattr(row, flag):
+        ids.extend(tid for tid in row.ids if tid != 0)
+    return tuple(ids)
 
   def test_complex_method_and_struct_sets_are_disjoint(self):
     self.assertTrue(
@@ -794,23 +803,27 @@ class TestIntrospectionTypeSetsAndClassification(unittest.TestCase):
     )
 
   def test_parameter_type_struct_refs_cover_all_directions_and_struct_sentinels(self):
-    struct_ids = self._row_ids("struct") + self._row_ids("struct[]")
-    for tid in struct_ids + (30, 31):
+    struct_ids = self._ids_for_flag("is_struct_kind")
+    for tid in struct_ids + (HamiltonDataType.STRUCTURE, HamiltonDataType.STRUCTURE_ARRAY):
       pt = ParameterType(tid, source_id=2, ref_id=1)
       self.assertTrue(pt.is_complex)
       self.assertTrue(pt.is_struct_ref)
       self.assertFalse(pt.is_enum_ref)
 
   def test_parameter_type_enum_refs_cover_all_directions_and_struct_sentinels(self):
-    enum_ids = self._row_ids("enum") + self._row_ids("enum[]")
-    for tid in enum_ids + (32, 35):
+    enum_ids = self._ids_for_flag("is_enum_kind")
+    for tid in enum_ids + (HamiltonDataType.ENUM, HamiltonDataType.ENUM_ARRAY):
       pt = ParameterType(tid, source_id=2, ref_id=1)
       self.assertTrue(pt.is_complex)
       self.assertTrue(pt.is_enum_ref)
       self.assertFalse(pt.is_struct_ref)
 
   def test_scalar_parameter_type_is_not_complex_or_reference(self):
-    scalar_id = self._row_ids("i32")[0]
+    # i32 In ID — first entry from a non-complex row
+    scalar_id = next(
+      row.ids[0] for row in introspection_mod._HOI_TYPE_ROWS
+      if not row.is_complex and row.ids[0] != 0 and row.display_name == "i32"
+    )
     pt = ParameterType(scalar_id)
     self.assertFalse(pt.is_complex)
     self.assertFalse(pt.is_struct_ref)
@@ -859,9 +872,6 @@ class _MinimalIntroBackend:
   def global_object_addresses(self):
     return ()
 
-  def get_root_object_addresses(self):
-    return []
-
   def get_firmware_tree_cache(self):
     return None
 
@@ -870,6 +880,12 @@ class _MinimalIntroBackend:
 
   async def send_command(self, *a, **k):
     raise AssertionError("send_command should be patched out in introspection cache tests")
+
+  async def send_query(self, *a, **k):
+    raise AssertionError("send_query should be patched out in introspection cache tests")
+
+  async def send_discovery_command(self, *a, **k):
+    raise AssertionError("send_discovery_command should be patched out in introspection cache tests")
 
   async def resolve_path(self, path: str):
     del path

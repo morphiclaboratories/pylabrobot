@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import struct as _struct
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, List, Literal, Optional, Union
 
 from pylabrobot.capabilities.liquid_handling.head8_backend import Head8Backend
 from pylabrobot.capabilities.liquid_handling.standard import (
@@ -1065,15 +1065,7 @@ class PrepMPHBackend(Head8Backend):
     if addr is None:
       return [None] * NUM_PROBES
 
-    Cmd = type(
-      "_GetTipPresent",
-      (PrepCmd.PrepStatusRequest,),
-      cast(
-        dict[str, Any],
-        {"command_id": 15, "__annotations__": {"dest": type(addr)}},
-      ),
-    )
-    raw = await self._driver.send_command(Cmd(dest=addr), return_raw=True, raise_on_error=False)
+    raw = await self._driver.send_query(PrepCmd.PrepProbeRequest(dest=addr, command_id=15))
     if raw is None or len(raw[0]) < 8:
       result = False
     else:

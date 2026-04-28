@@ -13,8 +13,8 @@ Tables
   text}``. Module-scoped text registered by ``NimbusCORESystem`` and
   ``GripperControllerSystem`` ``AddErrorData`` calls at runtime. Codes in this
   table start at 0x0F01 (3841) — the module-specific range.
-- ``PREP_ERROR_CODES`` : empty placeholder. Prep-specific codes surface as hex
-  until a Prep reference table is available and the generator is re-run.
+- ``PREP_ERROR_CODES`` : Prep-specific codes (pipettor and MPH). Module-specific
+  range starting at 0x0F01.
 """
 
 from __future__ import annotations

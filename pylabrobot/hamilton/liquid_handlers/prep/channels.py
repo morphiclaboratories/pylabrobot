@@ -200,11 +200,7 @@ async def request_channel_bounds(driver: "PrepDriver") -> List[PrepChannelBounds
   empty channels; with a tip attached the effective Z minimum is higher.
   """
   try:
-    raw = await driver.send_command(
-      PrepCmd.PrepGetChannelBounds(),
-      return_raw=True,
-      raise_on_error=False,
-    )
+    raw = await driver.send_query(PrepCmd.PrepGetChannelBounds())
   except RuntimeError:
     return []
   if raw is None:
