@@ -51,7 +51,6 @@ from pylabrobot.hamilton.tcp.messages import (
 from pylabrobot.hamilton.tcp.packets import Address
 from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol
 from pylabrobot.hamilton.tcp.wire_types import (
-  U8,
   U16,
   U32,
   HamiltonDataType,
@@ -84,7 +83,9 @@ class HamiltonTCPIntrospectionBackend(Protocol):
   @property
   def global_object_addresses(self) -> Sequence[Address]: ...
 
-  async def send_command(self, command: TCPCommand, *, read_timeout: Optional[float] = None) -> Any: ...
+  async def send_command(
+    self, command: TCPCommand, *, read_timeout: Optional[float] = None
+  ) -> Any: ...
 
   async def send_query(
     self, command: TCPCommand, *, read_timeout: Optional[float] = None
@@ -254,12 +255,14 @@ def _build_introspection_maps() -> _IntrospectionTypeMaps:
 
   # GetStructs sentinels (Parameter.ParameterTypes values) — live in the GetStructs wire format
   # only, not in _HOI_TYPE_ROWS.
-  complex_struct = frozenset({
-    HamiltonDataType.STRUCTURE,
-    HamiltonDataType.STRUCTURE_ARRAY,
-    HamiltonDataType.ENUM,
-    HamiltonDataType.ENUM_ARRAY,
-  })
+  complex_struct = frozenset(
+    {
+      HamiltonDataType.STRUCTURE,
+      HamiltonDataType.STRUCTURE_ARRAY,
+      HamiltonDataType.ENUM,
+      HamiltonDataType.ENUM_ARRAY,
+    }
+  )
   struct_ref_ids |= {HamiltonDataType.STRUCTURE, HamiltonDataType.STRUCTURE_ARRAY}
   enum_ref_ids |= {HamiltonDataType.ENUM, HamiltonDataType.ENUM_ARRAY}
 
@@ -1868,6 +1871,8 @@ class HamiltonIntrospection:
     """
     command = GetStructsCommand(address, interface_id)
     result = await self.backend.send_query(command)
+    if result is None:
+      raise RuntimeError("GetStructs query returned no data.")
     (params,) = result
     return params, inspect_hoi_params(params)
 

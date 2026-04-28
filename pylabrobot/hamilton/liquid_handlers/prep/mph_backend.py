@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import struct as _struct
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
 from pylabrobot.capabilities.liquid_handling.head8_backend import Head8Backend
 from pylabrobot.capabilities.liquid_handling.standard import (

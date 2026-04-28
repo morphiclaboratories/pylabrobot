@@ -48,7 +48,6 @@ from pylabrobot.hamilton.liquid_handlers.liquid_class_resolver import (
 )
 from pylabrobot.capabilities.liquid_handling.errors import ChannelizedError
 from pylabrobot.hamilton.tcp.hoi_error import HoiError
-from pylabrobot.hamilton.tcp.packets import Address
 from pylabrobot.resources import Coordinate, Tip
 from pylabrobot.resources.hamilton import HamiltonTip, TipSize
 from pylabrobot.resources.hamilton.hamilton_decks import HamiltonCoreGrippers
@@ -1716,7 +1715,7 @@ class PrepPIPBackend(PIPBackend):
     if not resp.positions:
       return []
 
-    _CHANNEL_ENUM_TO_IDX = {v: k for k, v in _CHANNEL_INDEX.items()}
+    _CHANNEL_ENUM_TO_IDX = {int(v): k for k, v in _CHANNEL_INDEX.items()}
     indexed: list[tuple[int, Coordinate]] = []
     for p in resp.positions:
       ch_idx = _CHANNEL_ENUM_TO_IDX.get(p.channel)
@@ -1845,7 +1844,9 @@ class PrepPIPBackend(PIPBackend):
     if channel_idx < len(tip_presence) and tip_presence[channel_idx]:
       # Query firmware for the held tip definition to get tip length
       pipettor_addr = await self._driver.resolve_path(PIPETTOR_OBJECT_PATH)
-      raw = await self._driver.send_query(PrepCmd.PrepProbeRequest(dest=pipettor_addr, command_id=13))
+      raw = await self._driver.send_query(
+        PrepCmd.PrepProbeRequest(dest=pipettor_addr, command_id=13)
+      )
       if raw is not None:
         import struct as _struct
 

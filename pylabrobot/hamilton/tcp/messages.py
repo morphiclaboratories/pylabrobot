@@ -113,50 +113,62 @@ class HoiParams:
 
   def i8(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import I8
+
     return self.add(value, I8)
 
   def i16(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import I16
+
     return self.add(value, I16)
 
   def i32(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import I32
+
     return self.add(value, I32)
 
   def i64(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import I64
+
     return self.add(value, I64)
 
   def u8(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import U8
+
     return self.add(value, U8)
 
   def u16(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import U16
+
     return self.add(value, U16)
 
   def u32(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import U32
+
     return self.add(value, U32)
 
   def u64(self, value: int) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import U64
+
     return self.add(value, U64)
 
   def f32(self, value: float) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import F32
+
     return self.add(value, F32)
 
   def f64(self, value: float) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import F64
+
     return self.add(value, F64)
 
   def bool_(self, value: bool) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import Bool
+
     return self.add(value, Bool)
 
   def str_(self, value: str) -> "HoiParams":
     from pylabrobot.hamilton.tcp.wire_types import Str
+
     return self.add(value, Str)
 
   # ------------------------------------------------------------------

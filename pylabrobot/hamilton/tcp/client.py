@@ -523,7 +523,11 @@ class HamiltonTCPClient(Driver):
   ) -> Any:
     """Send a command and return the interpreted response. Raises on any firmware error."""
     return await self._send_raw(
-      command, ensure_connection=True, return_raw=False, raise_on_error=True, read_timeout=read_timeout
+      command,
+      ensure_connection=True,
+      return_raw=False,
+      raise_on_error=True,
+      read_timeout=read_timeout,
     )
 
   async def send_query(
@@ -538,8 +542,15 @@ class HamiltonTCPClient(Driver):
     the firmware path may legitimately return an error (e.g. tip-presence checks).
     Follows SCPI convention: queries read state, commands change state.
     """
-    return await self._send_raw(
-      command, ensure_connection=True, return_raw=True, raise_on_error=False, read_timeout=read_timeout
+    return cast(
+      Optional[tuple],
+      await self._send_raw(
+        command,
+        ensure_connection=True,
+        return_raw=True,
+        raise_on_error=False,
+        read_timeout=read_timeout,
+      ),
     )
 
   async def send_discovery_command(
@@ -550,7 +561,11 @@ class HamiltonTCPClient(Driver):
   ) -> Any:
     """Send an Interface-0 introspection command during setup (no reconnect on failure)."""
     return await self._send_raw(
-      command, ensure_connection=False, return_raw=False, raise_on_error=True, read_timeout=read_timeout
+      command,
+      ensure_connection=False,
+      return_raw=False,
+      raise_on_error=True,
+      read_timeout=read_timeout,
     )
 
   async def _send_raw(

@@ -60,7 +60,6 @@ def test_assert_required_methods_missing_raises():
   asyncio.run(_run())
 
 
-
 def test_nimbus_core_address_raises_before_setup():
   """Property requires setup() to have discovered and stored NimbusCore."""
   driver = NimbusDriver(host="127.0.0.1")

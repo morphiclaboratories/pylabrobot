@@ -821,7 +821,8 @@ class TestIntrospectionTypeSetsAndClassification(unittest.TestCase):
   def test_scalar_parameter_type_is_not_complex_or_reference(self):
     # i32 In ID — first entry from a non-complex row
     scalar_id = next(
-      row.ids[0] for row in introspection_mod._HOI_TYPE_ROWS
+      row.ids[0]
+      for row in introspection_mod._HOI_TYPE_ROWS
       if not row.is_complex and row.ids[0] != 0 and row.display_name == "i32"
     )
     pt = ParameterType(scalar_id)
@@ -885,7 +886,9 @@ class _MinimalIntroBackend:
     raise AssertionError("send_query should be patched out in introspection cache tests")
 
   async def send_discovery_command(self, *a, **k):
-    raise AssertionError("send_discovery_command should be patched out in introspection cache tests")
+    raise AssertionError(
+      "send_discovery_command should be patched out in introspection cache tests"
+    )
 
   async def resolve_path(self, path: str):
     del path
