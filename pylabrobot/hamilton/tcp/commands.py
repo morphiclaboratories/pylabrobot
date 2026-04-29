@@ -84,12 +84,17 @@ class TCPCommand:
   def build_parameters(self) -> HoiParams:
     """Build HOI parameters for this command.
 
-    Override this method in subclasses to provide command-specific parameters.
-    Return a HoiParams object (not bytes!).
+    Default: serializes all ``Annotated`` wire-type fields on ``self`` via
+    ``HoiParams.from_struct``.  On non-dataclass subclasses ``from_struct``
+    finds no fields and returns an empty ``HoiParams``, preserving the old
+    behaviour.  Override only when the wire layout cannot be expressed with
+    ``Annotated`` field declarations.
 
     Returns:
       HoiParams object with command parameters
     """
+    if is_dataclass(self):
+      return HoiParams.from_struct(self)
     return HoiParams()
 
   def get_log_params(self) -> dict:
