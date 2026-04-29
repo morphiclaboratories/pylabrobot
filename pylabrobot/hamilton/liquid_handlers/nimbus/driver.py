@@ -178,9 +178,9 @@ class NimbusDriver(HamiltonTCPClient):
     )
 
     # Query channel configuration
-    config = await self.send_command(GetChannelConfiguration_1(nimbus_core_address))
+    config = await self.send_command(GetChannelConfiguration_1(dest=nimbus_core_address))
     assert config is not None, "GetChannelConfiguration_1 command returned None"
-    num_channels = config["channels"]
+    num_channels = config.channels
     logger.info(f"Channel configuration: {num_channels} channels")
 
     # Create backends — each object stores its own address and state
@@ -224,5 +224,5 @@ class NimbusDriver(HamiltonTCPClient):
 
   async def park(self):
     """Park the instrument."""
-    await self.send_command(Park(self.nimbus_core_address))
+    await self.send_command(Park(dest=self.nimbus_core_address))
     logger.info("Instrument parked successfully")

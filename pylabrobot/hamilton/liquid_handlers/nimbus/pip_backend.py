@@ -23,6 +23,7 @@ from pylabrobot.resources.trash import Trash
 from .commands import (
   Aspirate,
   DisableADC,
+  Dispense as DispenseCommand,
   DropTips,
   DropTipsRoll,
   EnableADC,
@@ -34,9 +35,6 @@ from .commands import (
   SetChannelConfiguration,
   _get_default_flow_rate,
   _get_tip_type_from_tip,
-)
-from .commands import (
-  Dispense as DispenseCommand,
 )
 
 if TYPE_CHECKING:
@@ -209,9 +207,9 @@ class NimbusPIPBackend(PIPBackend):
     """Initialize SmartRoll if not already initialized."""
     del backend_params
     # Query initialization status
-    init_status = await self.driver.send_command(IsInitialized(self.driver.nimbus_core_address))
+    init_status = await self.driver.send_command(IsInitialized(dest=self.driver.nimbus_core_address))
     assert init_status is not None
-    is_initialized = init_status.get("initialized", False)
+    is_initialized = init_status.initialized
 
     if not is_initialized:
       await self._initialize_smart_roll()
@@ -418,9 +416,9 @@ class NimbusPIPBackend(PIPBackend):
   # ---------------------------------------------------------------------------
 
   async def request_tip_presence(self) -> List[Optional[bool]]:
-    tip_status = await self.driver.send_command(IsTipPresent(self.pipette_address))
+    tip_status = await self.driver.send_command(IsTipPresent(dest=self.pipette_address))
     assert tip_status is not None, "IsTipPresent command returned None"
-    tip_present = tip_status.get("tip_present", [])
+    tip_present = tip_status.tip_present
     return [bool(v) for v in tip_present]
 
   def can_pick_up_tip(self, channel_idx: int, tip: Tip) -> bool:
@@ -676,9 +674,9 @@ class NimbusPIPBackend(PIPBackend):
 
     # ADC control
     if params.adc_enabled:
-      await self.driver.send_command(EnableADC(self.pipette_address, channels_involved))
+      await self.driver.send_command(EnableADC(channels_involved=channels_involved, dest=self.pipette_address))
     else:
-      await self.driver.send_command(DisableADC(self.pipette_address, channels_involved))
+      await self.driver.send_command(DisableADC(channels_involved=channels_involved, dest=self.pipette_address))
 
     # Query channel configurations
     if self._channel_configurations is None:
@@ -687,10 +685,10 @@ class NimbusPIPBackend(PIPBackend):
       channel_num = channel_idx + 1
       try:
         config = await self.driver.send_command(
-          GetChannelConfiguration(self.pipette_address, channel=channel_num, indexes=[2])
+          GetChannelConfiguration(channel=channel_num, indexes=[2], dest=self.pipette_address)
         )
         assert config is not None
-        enabled = config["enabled"][0] if config["enabled"] else False
+        enabled = config.enabled[0] if config.enabled else False
         if channel_num not in self._channel_configurations:
           self._channel_configurations[channel_num] = {}
         self._channel_configurations[channel_num][2] = enabled
@@ -952,9 +950,9 @@ class NimbusPIPBackend(PIPBackend):
 
     # ADC control
     if params.adc_enabled:
-      await self.driver.send_command(EnableADC(self.pipette_address, channels_involved))
+      await self.driver.send_command(EnableADC(channels_involved=channels_involved, dest=self.pipette_address))
     else:
-      await self.driver.send_command(DisableADC(self.pipette_address, channels_involved))
+      await self.driver.send_command(DisableADC(channels_involved=channels_involved, dest=self.pipette_address))
 
     # Query channel configurations
     if self._channel_configurations is None:
@@ -963,10 +961,10 @@ class NimbusPIPBackend(PIPBackend):
       channel_num = channel_idx + 1
       try:
         config = await self.driver.send_command(
-          GetChannelConfiguration(self.pipette_address, channel=channel_num, indexes=[2])
+          GetChannelConfiguration(channel=channel_num, indexes=[2], dest=self.pipette_address)
         )
         assert config is not None
-        enabled = config["enabled"][0] if config["enabled"] else False
+        enabled = config.enabled[0] if config.enabled else False
         if channel_num not in self._channel_configurations:
           self._channel_configurations[channel_num] = {}
         self._channel_configurations[channel_num][2] = enabled

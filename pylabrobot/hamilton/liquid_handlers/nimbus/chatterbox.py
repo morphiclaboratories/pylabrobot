@@ -87,15 +87,15 @@ class NimbusChatterboxDriver(NimbusDriver):
     )
 
     if isinstance(command, GetChannelConfiguration_1):
-      return {"channels": self._num_channels}
+      return GetChannelConfiguration_1.Response(channels=self._num_channels, channel_types=[])
     if isinstance(command, IsInitialized):
-      return {"initialized": True}
+      return IsInitialized.Response(initialized=True)
     if isinstance(command, IsTipPresent):
-      return {"tip_present": [False] * self._num_channels}
+      return IsTipPresent.Response(tip_present=[False] * self._num_channels)
     if isinstance(command, IsDoorLocked):
-      return {"locked": True}
+      return IsDoorLocked.Response(locked=True)
     if isinstance(command, GetChannelConfiguration):
-      return {"enabled": [False]}
+      return GetChannelConfiguration.Response(enabled=[False])
     if return_raw:
       return (b"",)
     return None

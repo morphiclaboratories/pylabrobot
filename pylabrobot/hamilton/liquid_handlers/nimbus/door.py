@@ -41,16 +41,16 @@ class NimbusDoor:
 
   async def is_locked(self) -> bool:
     """Check if the door is locked."""
-    status = await self.driver.send_command(IsDoorLocked(self.address))
+    status = await self.driver.send_command(IsDoorLocked(dest=self.address))
     assert status is not None, "IsDoorLocked command returned None"
-    return bool(status["locked"])
+    return bool(status.locked)
 
   async def lock(self) -> None:
     """Lock the door."""
-    await self.driver.send_command(LockDoor(self.address))
+    await self.driver.send_command(LockDoor(dest=self.address))
     logger.info("Door locked successfully")
 
   async def unlock(self) -> None:
     """Unlock the door."""
-    await self.driver.send_command(UnlockDoor(self.address))
+    await self.driver.send_command(UnlockDoor(dest=self.address))
     logger.info("Door unlocked successfully")

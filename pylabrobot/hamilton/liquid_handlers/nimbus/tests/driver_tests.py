@@ -23,10 +23,10 @@ def test_chatterbox_setup_and_command_roundtrip():
     assert driver.door is not None
 
     response = await driver.send_command(
-      GetChannelConfiguration_1(driver.nimbus_core_address),
+      GetChannelConfiguration_1(dest=driver.nimbus_core_address),
       read_timeout=0.1,
     )
-    assert response == {"channels": 8}
+    assert response.channels == 8
 
     await driver.stop()
 
