@@ -32,24 +32,17 @@ _V2_MPH_METHOD_IDS = frozenset(range(29, 35))
 class _PrepChatterboxIntrospection(HamiltonIntrospection):
   """Offline introspection: v2 probe succeeds when ``use_v1_aspirate_dispense`` is False."""
 
+  def __init__(self, *args, stub_methods_fn: Any, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._stub_methods_fn = stub_methods_fn
+
   async def methods_for_interface(
     self, address: Union[Address, str], interface_id: int
   ) -> List[MethodInfo]:
-    client = self.backend
-    if not isinstance(client, PrepChatterboxDriver):
-      return await super().methods_for_interface(address, interface_id)
     addr = await self._resolve_target_address(address)
-    if interface_id == 1 and not client._use_v1_aspirate_dispense:
-      if client._pipettor_addr is not None and addr == client._pipettor_addr:
-        return [
-          MethodInfo(interface_id=1, call_type=0, method_id=mid, name=f"v2_stub_{mid}")
-          for mid in sorted(_V2_PIPETTING_METHOD_IDS)
-        ]
-      if client._mph_addr is not None and addr == client._mph_addr:
-        return [
-          MethodInfo(interface_id=1, call_type=0, method_id=mid, name=f"v2_mph_stub_{mid}")
-          for mid in sorted(_V2_MPH_METHOD_IDS)
-        ]
+    stubs = self._stub_methods_fn(addr, interface_id)
+    if stubs is not None:
+      return stubs
     return await super().methods_for_interface(address, interface_id)
 
 
@@ -97,7 +90,28 @@ class PrepChatterboxDriver(PrepDriver):
   @property
   def introspection(self) -> HamiltonIntrospection:
     if self._introspection_impl is None:
-      self._introspection_impl = _PrepChatterboxIntrospection(self)
+
+      def _stub_methods(addr: Address, interface_id: int) -> Optional[List[MethodInfo]]:
+        if interface_id == 1 and not self._use_v1_aspirate_dispense:
+          if self._pipettor_addr is not None and addr == self._pipettor_addr:
+            return [
+              MethodInfo(interface_id=1, call_type=0, method_id=mid, name=f"v2_stub_{mid}")
+              for mid in sorted(_V2_PIPETTING_METHOD_IDS)
+            ]
+          if self._mph_addr is not None and addr == self._mph_addr:
+            return [
+              MethodInfo(interface_id=1, call_type=0, method_id=mid, name=f"v2_mph_stub_{mid}")
+              for mid in sorted(_V2_MPH_METHOD_IDS)
+            ]
+        return None
+
+      self._introspection_impl = _PrepChatterboxIntrospection(
+        registry=self._registry,
+        global_object_addresses=self._global_object_addresses,
+        send_discovery_command=self.send_discovery_command,
+        send_query=self.send_query,
+        stub_methods_fn=_stub_methods,
+      )
     return self._introspection_impl
 
   async def setup(self, backend_params: Optional[BackendParams] = None):
