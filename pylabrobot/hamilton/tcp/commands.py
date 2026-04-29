@@ -27,30 +27,24 @@ from pylabrobot.hamilton.tcp.wire_types import HcResultEntry
 class TCPCommand:
   """Base class for Hamilton TCP commands.
 
-  This replaces the old command base from tcp_codec.py with a cleaner design:
-  - Explicitly uses CommandMessage for building packets
-  - build_parameters() returns HoiParams object (not bytes)
-  - Uses Address instead of ObjectAddress
-  - Cleaner separation of concerns
+  Preferred usage: define commands as ``@dataclass`` subclasses with
+  ``Annotated`` wire-type fields.  ``build_parameters()`` and
+  ``interpret_response()`` are handled automatically by the base class.
 
-  Example:
+  Example::
+
+      @dataclass
       class MyCommand(TCPCommand):
           protocol = HamiltonProtocol.OBJECT_DISCOVERY
           interface_id = 0
           command_id = 42
 
-          def __init__(self, dest: Address, value: int):
-              super().__init__(dest)
-              self.value = value
+          dest: Address          # infrastructure field — not serialised
+          value: Annotated[int, I32]   # wire field — serialised in order
 
-          def build_parameters(self) -> HoiParams:
-              return HoiParams().i32(self.value)
-
-          @classmethod
-          def parse_response_parameters(cls, data: bytes) -> dict:
-              parser = HoiParamsParser(data)
-              _, result = parser.parse_next()
-              return {'result': result}
+          @dataclass
+          class Response:
+              result: Annotated[int, U32]
   """
 
   # Class-level attributes that subclasses must override
