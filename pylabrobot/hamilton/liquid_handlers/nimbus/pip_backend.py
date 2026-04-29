@@ -207,7 +207,7 @@ class NimbusPIPBackend(PIPBackend):
     """Initialize SmartRoll if not already initialized."""
     del backend_params
     # Query initialization status
-    init_status = await self.driver.send_command(IsInitialized(dest=self.driver.nimbus_core_address))
+    init_status = await self.driver.send_command(IsInitialized())
     assert init_status is not None
     is_initialized = init_status.initialized
 
@@ -226,7 +226,6 @@ class NimbusPIPBackend(PIPBackend):
     for channel in range(1, self.num_channels + 1):
       await self.driver.send_command(
         SetChannelConfiguration(
-          dest=self.pipette_address,
           channel=channel,
           indexes=[1, 3, 4],
           enables=[True, False, False, False],
@@ -247,7 +246,6 @@ class NimbusPIPBackend(PIPBackend):
 
     await self.driver.send_command(
       InitializeSmartRoll(
-        dest=self.driver.nimbus_core_address,
         x_positions=x_positions_full,
         y_positions=y_positions_full,
         begin_tip_deposit_process=begin_tip_deposit_process_full,
@@ -416,7 +414,7 @@ class NimbusPIPBackend(PIPBackend):
   # ---------------------------------------------------------------------------
 
   async def request_tip_presence(self) -> List[Optional[bool]]:
-    tip_status = await self.driver.send_command(IsTipPresent(dest=self.pipette_address))
+    tip_status = await self.driver.send_command(IsTipPresent())
     assert tip_status is not None, "IsTipPresent command returned None"
     tip_present = tip_status.tip_present
     return [bool(v) for v in tip_present]
@@ -494,7 +492,6 @@ class NimbusPIPBackend(PIPBackend):
     traverse_height_units = round(traverse_height * 100)
 
     command = PickupTips(
-      dest=self.pipette_address,
       channels_involved=channels_involved,
       x_positions=x_positions_full,
       y_positions=y_positions_full,
@@ -584,7 +581,6 @@ class NimbusPIPBackend(PIPBackend):
       )
 
       command = DropTipsRoll(
-        dest=self.pipette_address,
         channels_involved=channels_involved,
         x_positions=x_positions_full,
         y_positions=y_positions_full,
@@ -609,7 +605,6 @@ class NimbusPIPBackend(PIPBackend):
       )
 
       command = DropTips(
-        dest=self.pipette_address,
         channels_involved=channels_involved,
         x_positions=x_positions_full,
         y_positions=y_positions_full,
@@ -674,9 +669,9 @@ class NimbusPIPBackend(PIPBackend):
 
     # ADC control
     if params.adc_enabled:
-      await self.driver.send_command(EnableADC(channels_involved=channels_involved, dest=self.pipette_address))
+      await self.driver.send_command(EnableADC(channels_involved=channels_involved))
     else:
-      await self.driver.send_command(DisableADC(channels_involved=channels_involved, dest=self.pipette_address))
+      await self.driver.send_command(DisableADC(channels_involved=channels_involved))
 
     # Query channel configurations
     if self._channel_configurations is None:
@@ -685,7 +680,7 @@ class NimbusPIPBackend(PIPBackend):
       channel_num = channel_idx + 1
       try:
         config = await self.driver.send_command(
-          GetChannelConfiguration(channel=channel_num, indexes=[2], dest=self.pipette_address)
+          GetChannelConfiguration(channel=channel_num, indexes=[2])
         )
         assert config is not None
         enabled = config.enabled[0] if config.enabled else False
@@ -860,7 +855,6 @@ class NimbusPIPBackend(PIPBackend):
     recording_mode = 0
 
     command = Aspirate(
-      dest=self.pipette_address,
       aspirate_type=aspirate_type,
       channels_involved=channels_involved,
       x_positions=x_positions_full,
@@ -950,9 +944,9 @@ class NimbusPIPBackend(PIPBackend):
 
     # ADC control
     if params.adc_enabled:
-      await self.driver.send_command(EnableADC(channels_involved=channels_involved, dest=self.pipette_address))
+      await self.driver.send_command(EnableADC(channels_involved=channels_involved))
     else:
-      await self.driver.send_command(DisableADC(channels_involved=channels_involved, dest=self.pipette_address))
+      await self.driver.send_command(DisableADC(channels_involved=channels_involved))
 
     # Query channel configurations
     if self._channel_configurations is None:
@@ -961,7 +955,7 @@ class NimbusPIPBackend(PIPBackend):
       channel_num = channel_idx + 1
       try:
         config = await self.driver.send_command(
-          GetChannelConfiguration(channel=channel_num, indexes=[2], dest=self.pipette_address)
+          GetChannelConfiguration(channel=channel_num, indexes=[2])
         )
         assert config is not None
         enabled = config.enabled[0] if config.enabled else False
@@ -1140,7 +1134,6 @@ class NimbusPIPBackend(PIPBackend):
     recording_mode = 0
 
     command = DispenseCommand(
-      dest=self.pipette_address,
       dispense_type=dispense_type,
       channels_involved=channels_involved,
       x_positions=x_positions_full,

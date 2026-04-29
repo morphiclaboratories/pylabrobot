@@ -9,6 +9,7 @@ from __future__ import annotations
 import enum
 import logging
 from dataclasses import dataclass, field
+from typing import ClassVar, Optional, Set
 
 from pylabrobot.hamilton.tcp.commands import TCPCommand
 
@@ -41,12 +42,26 @@ class NimbusCommand(TCPCommand):
   declare required positional wire fields without default-ordering conflicts.
   ``build_parameters()`` is inherited from ``TCPCommand`` and serialises all
   ``Annotated`` fields via ``HoiParams.from_struct(self)`` automatically.
+
+  Firmware target is declared via class-level ``firmware_path`` and resolved
+  JIT in :meth:`NimbusDriver._send_raw` when ``dest`` is the unresolved
+  sentinel. Set ``firmware_path = None`` for polymorphic commands that require
+  explicit ``dest=`` at construction.
   """
 
   protocol = HamiltonProtocol.OBJECT_DISCOVERY
   interface_id = 1
 
+  firmware_path: ClassVar[Optional[str]] = None
+  _ALL_PATHS: ClassVar[Set[str]] = set()
+
   dest: Address = field(default=_UNRESOLVED, kw_only=True)
+
+  def __init_subclass__(cls, **kwargs):
+    super().__init_subclass__(**kwargs)
+    path = cls.__dict__.get("firmware_path")
+    if path is not None:
+      NimbusCommand._ALL_PATHS.add(path)
 
   def __post_init__(self):
     super().__init__(self.dest)
@@ -149,6 +164,7 @@ class LockDoor(NimbusCommand):
   """Lock door command (DoorLock at 1:1:268, interface_id=1, command_id=1)."""
 
   command_id = 1
+  firmware_path = "NimbusCORE.DoorLock"
 
 
 @dataclass
@@ -156,6 +172,7 @@ class UnlockDoor(NimbusCommand):
   """Unlock door command (DoorLock at 1:1:268, interface_id=1, command_id=2)."""
 
   command_id = 2
+  firmware_path = "NimbusCORE.DoorLock"
 
 
 @dataclass
@@ -163,6 +180,7 @@ class IsDoorLocked(NimbusCommand):
   """Check if door is locked (DoorLock at 1:1:268, interface_id=1, command_id=3)."""
 
   command_id = 3
+  firmware_path = "NimbusCORE.DoorLock"
   action_code = 0
 
   @dataclass
@@ -175,6 +193,7 @@ class PreInitializeSmart(NimbusCommand):
   """Pre-initialize smart command (Pipette at 1:1:257, interface_id=1, command_id=32)."""
 
   command_id = 32
+  firmware_path = "NimbusCORE.Pipette"
 
 
 @dataclass
@@ -186,6 +205,7 @@ class InitializeSmartRoll(NimbusCommand):
   """
 
   command_id = 29
+  firmware_path = "NimbusCORE"
 
   x_positions: I32Array
   y_positions: I32Array
@@ -200,6 +220,7 @@ class IsInitialized(NimbusCommand):
   """Check if instrument is initialized (NimbusCore at 1:1:48896, interface_id=1, command_id=14)."""
 
   command_id = 14
+  firmware_path = "NimbusCORE"
   action_code = 0
 
   @dataclass
@@ -212,6 +233,7 @@ class IsTipPresent(NimbusCommand):
   """Check tip presence (Pipette at 1:1:257, interface_id=1, command_id=16)."""
 
   command_id = 16
+  firmware_path = "NimbusCORE.Pipette"
   action_code = 0
 
   @dataclass
@@ -224,6 +246,7 @@ class GetChannelConfiguration_1(NimbusCommand):
   """Get channel configuration (NimbusCore root, interface_id=1, command_id=15)."""
 
   command_id = 15
+  firmware_path = "NimbusCORE"
   action_code = 0
 
   @dataclass
@@ -243,6 +266,7 @@ class SetChannelConfiguration(NimbusCommand):
   """
 
   command_id = 67
+  firmware_path = "NimbusCORE.Pipette"
 
   channel: U16
   indexes: I16Array
@@ -259,6 +283,7 @@ class GetChannelConfiguration(NimbusCommand):
   """
 
   command_id = 66
+  firmware_path = "NimbusCORE.Pipette"
   action_code = 0
 
   channel: U16
@@ -274,6 +299,7 @@ class Park(NimbusCommand):
   """Park command (NimbusCore at 1:1:48896, interface_id=1, command_id=3)."""
 
   command_id = 3
+  firmware_path = "NimbusCORE"
 
 
 @dataclass
@@ -289,6 +315,7 @@ class PickupTips(NimbusCommand):
   """
 
   command_id = 4
+  firmware_path = "NimbusCORE.Pipette"
 
   channels_involved: U16Array
   x_positions: I32Array
@@ -312,6 +339,7 @@ class DropTips(NimbusCommand):
   """
 
   command_id = 5
+  firmware_path = "NimbusCORE.Pipette"
 
   channels_involved: U16Array
   x_positions: I32Array
@@ -335,6 +363,7 @@ class DropTipsRoll(NimbusCommand):
   """
 
   command_id = 82
+  firmware_path = "NimbusCORE.Pipette"
 
   channels_involved: U16Array
   x_positions: I32Array
@@ -355,6 +384,7 @@ class EnableADC(NimbusCommand):
   """
 
   command_id = 43
+  firmware_path = "NimbusCORE.Pipette"
 
   channels_involved: U16Array
 
@@ -368,6 +398,7 @@ class DisableADC(NimbusCommand):
   """
 
   command_id = 44
+  firmware_path = "NimbusCORE.Pipette"
 
   channels_involved: U16Array
 
@@ -391,6 +422,7 @@ class Aspirate(NimbusCommand):
   """
 
   command_id = 6
+  firmware_path = "NimbusCORE.Pipette"
 
   # Channel selectors/modes.
   aspirate_type: I16Array
@@ -451,6 +483,7 @@ class Dispense(NimbusCommand):
   """
 
   command_id = 7
+  firmware_path = "NimbusCORE.Pipette"
 
   # Channel selectors/modes.
   dispense_type: I16Array
