@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, ClassVar, Dict, Optional, Tuple
 
-from pylabrobot.hamilton.tcp.introspection import FirmwareTree
+from pylabrobot.hamilton.tcp.introspection import FirmwareTreeNode
 from pylabrobot.hamilton.tcp.packets import Address
 
 from . import prep_commands as PrepCmd
@@ -276,6 +276,6 @@ class PrepInstrumentInfo:
       return None
     return await self._driver._query_firmware_string(addr, cmd_id=5)
 
-  async def get_firmware_tree(self, refresh: bool = False) -> FirmwareTree:
+  async def get_firmware_tree(self, refresh: bool = False) -> FirmwareTreeNode:
     """Firmware object tree. ``print(await info.get_firmware_tree())`` for a diagnostic dump."""
     return await self._driver.introspection.get_firmware_tree(refresh=refresh)
