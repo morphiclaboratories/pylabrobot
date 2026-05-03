@@ -1,6 +1,6 @@
 """Transport-level protocol constants only.
 
-HamiltonProtocol, Hoi2Action, HarpTransportableProtocol, RegistrationActionCode,
+TransportableProtocol, Hoi2Action, HarpTransportableProtocol, RegistrationActionCode,
 RegistrationOptionType, HoiRequestId. DataFragment type IDs (I8, I32, STRUCTURE,
 etc.) are defined in wire_types.HamiltonDataType.
 """
@@ -14,20 +14,22 @@ HAMILTON_PROTOCOL_VERSION_MAJOR = 3
 HAMILTON_PROTOCOL_VERSION_MINOR = 0
 
 
-class HamiltonProtocol(IntEnum):
-  """Hamilton protocol identifiers.
+class TransportableProtocol(IntEnum):
+  """Outer IP-layer transport protocol identifiers.
 
-  These values are derived from the piglet Rust implementation:
-  - Protocol 2: PIPETTE - pipette-specific operations
-  - Protocol 3: REGISTRATION - object registration and discovery
-  - Protocol 6: OBJECT_DISCOVERY - general object discovery and method calls
-  - Protocol 7: INITIALIZATION - connection initialization and client ID negotiation
+  From Hamilton.Components.TransportLayer.Protocols.TransportableProtocol.
+  Written to byte 2 of IpPacket2. Determines which payload parser handles
+  the packet at the receiving end.
+
+  - HARP2 (6): Standard outer wrapper for all HOI2 and Registration2 payloads.
+    This is used for every normal method call (aspirate, dispense, tip handling,
+    introspection, etc.) — not just discovery.
+  - CONNECTION2 (7): Connection/initialization handshake protocol. Used during
+    TCP session setup to negotiate node IDs and keep-alive parameters.
   """
 
-  PIPETTE = 0x02
-  REGISTRATION = 0x03
-  OBJECT_DISCOVERY = 0x06
-  INITIALIZATION = 0x07
+  HARP2 = 0x06
+  CONNECTION2 = 0x07
 
 
 class Hoi2Action(IntEnum):

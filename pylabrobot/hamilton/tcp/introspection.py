@@ -52,7 +52,7 @@ from pylabrobot.hamilton.tcp.messages import (
   inspect_hoi_params,
 )
 from pylabrobot.hamilton.tcp.packets import Address
-from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol
+from pylabrobot.hamilton.tcp.protocol import Hoi2Action, TransportableProtocol
 from pylabrobot.hamilton.tcp.wire_types import (
   U16,
   U32,
@@ -962,10 +962,10 @@ class GlobalTypePool:
 class GetObjectCommand(TCPCommand):
   """Get object metadata (command_id=1)."""
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 0
   command_id = 1
-  action_code = 0  # QUERY
+  action_code = Hoi2Action.STATUS_REQUEST
 
   def __init__(self, object_address: Address):
     super().__init__(object_address)
@@ -981,10 +981,10 @@ class GetObjectCommand(TCPCommand):
 class GetMethodCommand(TCPCommand):
   """Get method signature (command_id=2)."""
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 0
   command_id = 2
-  action_code = 0  # QUERY
+  action_code = Hoi2Action.STATUS_REQUEST
 
   def __init__(self, object_address: Address, method_index: int):
     super().__init__(object_address)
@@ -1067,10 +1067,10 @@ class GetMethodCommand(TCPCommand):
 class GetSubobjectAddressCommand(TCPCommand):
   """Get subobject address (command_id=3)."""
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 0
   command_id = 3
-  action_code = 0  # QUERY
+  action_code = Hoi2Action.STATUS_REQUEST
 
   def __init__(self, object_address: Address, subobject_index: int):
     super().__init__(object_address)
@@ -1094,10 +1094,10 @@ class GetInterfacesCommand(TCPCommand):
   Returns 2 columnar fragments, not count+rows.
   """
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 0
   command_id = 4
-  action_code = 0  # QUERY
+  action_code = Hoi2Action.STATUS_REQUEST
 
   def __init__(self, object_address: Address):
     super().__init__(object_address)
@@ -1117,10 +1117,10 @@ class GetEnumsCommand(TCPCommand):
   Returns 4 columnar fragments, not count+rows.
   """
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 0
   command_id = 5
-  action_code = 0  # QUERY
+  action_code = Hoi2Action.STATUS_REQUEST
 
   def __init__(self, object_address: Address, target_interface_id: int):
     super().__init__(object_address)
@@ -1141,10 +1141,10 @@ class GetEnumsCommand(TCPCommand):
 class GetStructsCommand(TCPCommand):
   """Get struct definitions (command_id=6)."""
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 0
   command_id = 6
-  action_code = 0  # QUERY
+  action_code = Hoi2Action.STATUS_REQUEST
 
   def __init__(self, object_address: Address, target_interface_id: int):
     super().__init__(object_address)

@@ -117,6 +117,8 @@ class NimbusCoreGripper(GripperArmBackend):
   def __init__(self, *, driver: "NimbusDriver", pip: "NimbusPIPBackend") -> None:
     self._driver = driver
     self._pip = pip
+    #: 0-based ``front`` channel index after :meth:`pick_up_tool` (``rear = front - 1``).
+    self._core_front_channel: Optional[int] = None
 
   @property
   def client(self):
@@ -195,10 +197,13 @@ class NimbusCoreGripper(GripperArmBackend):
   ) -> None:
     """Release plate / open CoRe gripper (ReleasePlate, cmd=14)."""
     num_ch = self._pip.num_channels
+    front = self._core_front_channel if self._core_front_channel is not None else num_ch - 1
+    rear = front - 1
+    ch1, ch2 = rear + 1, front + 1
     await self._driver.send_command(
       ReleasePlate(
-        first_channel_number=1,
-        second_channel_number=num_ch,
+        first_channel_number=ch1,
+        second_channel_number=ch2,
       )
     )
 
@@ -245,14 +250,24 @@ class NimbusCoreGripper(GripperArmBackend):
     y_ch1: float,
     y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
+    core_front_channel: Optional[int] = None,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
-    """Pick up CoRe gripper tool (PickupGripperTool, cmd=9)."""
+    """Pick up CoRe gripper tool (PickupGripperTool, cmd=9).
+
+    Args:
+      core_front_channel: 0-based **front** channel index (same convention as STAR
+        ``front_channel``). Default ``None`` → ``front = num_channels - 1``; then
+        ``rear = front - 1``. Firmware channel numbers are 1-based ``rear + 1`` and
+        ``front + 1``.
+    """
     if not isinstance(backend_params, NimbusCoreGripper.PickUpToolParams):
       backend_params = NimbusCoreGripper.PickUpToolParams()
     p = backend_params
+    num_ch = self._pip.num_channels
+    front = (num_ch - 1) if core_front_channel is None else core_front_channel
+    rear = front - 1
+    ch1, ch2 = rear + 1, front + 1
     await self._driver.send_command(
       PickupGripperTool(
         x_position=_mm(x),
@@ -262,11 +277,12 @@ class NimbusCoreGripper(GripperArmBackend):
         z_start_position=_mm(p.traverse_height - p.z_start_offset),
         z_stop_position=_mm(p.z_stop_position),
         tip_type=p.tip_type,
-        first_channel_number=channel1,
-        second_channel_number=channel2,
+        first_channel_number=ch1,
+        second_channel_number=ch2,
         tool_width=_mm(p.tool_width),
       )
     )
+    self._core_front_channel = front
 
   async def drop_tool(
     self,
@@ -274,14 +290,36 @@ class NimbusCoreGripper(GripperArmBackend):
     y_ch1: float,
     y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
+    core_front_channel: Optional[int] = None,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
-    """Drop CoRe gripper tool (DropGripperTool, cmd=10)."""
+    """Drop CoRe gripper tool (DropGripperTool, cmd=10).
+
+    Args:
+      core_front_channel: 0-based ``front`` index; must match the mounted pair when set.
+        If ``None``, uses the stored ``front`` from :meth:`pick_up_tool`, or
+        ``front = num_channels - 1`` when nothing is mounted (same default as pick-up).
+    """
     if not isinstance(backend_params, NimbusCoreGripper.DropToolParams):
       backend_params = NimbusCoreGripper.DropToolParams()
     p = backend_params
+    num_ch = self._pip.num_channels
+    mounted_front = self._core_front_channel
+    if (
+      mounted_front is not None
+      and core_front_channel is not None
+      and core_front_channel != mounted_front
+    ):
+      raise ValueError(
+        f"core_front_channel={core_front_channel} does not match mounted CoRe pair "
+        f"(front index {mounted_front}). Use the same value as for pick_up_tool / pick_up_core_grippers."
+      )
+    if mounted_front is not None:
+      front = mounted_front
+    else:
+      front = (num_ch - 1) if core_front_channel is None else core_front_channel
+    rear = front - 1
+    ch1, ch2 = rear + 1, front + 1
     await self._driver.send_command(
       DropGripperTool(
         x_position=_mm(x),
@@ -291,10 +329,11 @@ class NimbusCoreGripper(GripperArmBackend):
         z_start_position=_mm(p.traverse_height),
         z_stop_position=_mm(0.0),
         z_final=_mm(p.z_final),
-        first_channel_number=channel1,
-        second_channel_number=channel2,
+        first_channel_number=ch1,
+        second_channel_number=ch2,
       )
     )
+    self._core_front_channel = None
 
 
 class NimbusGripperArm(GripperArm):

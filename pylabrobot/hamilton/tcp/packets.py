@@ -15,6 +15,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
+from pylabrobot.hamilton.tcp.protocol import Hoi2Action
 from pylabrobot.io.binary import Reader, Writer
 
 # Hamilton protocol version
@@ -83,7 +84,7 @@ class IpPacket:
   Bytes:       payload
   """
 
-  protocol: int  # Protocol identifier (6=OBJECT_DISCOVERY, 7=INITIALIZATION)
+  protocol: int  # Protocol identifier — see TransportableProtocol (6=HARP2, 7=CONNECTION2)
   payload: bytes
   options: bytes = b""
 
@@ -146,7 +147,7 @@ class HarpPacket:
   dst: Address
   seq: int
   protocol: int  # 2=HOI, 3=Registration
-  action_code: int  # Base action code (0-15)
+  action_code: Hoi2Action
   payload: bytes
   options: bytes = b""
   response_required: bool = True  # Controls bit 4 of action byte
@@ -206,7 +207,7 @@ class HarpPacket:
     payload = r.remaining()
 
     # Decompose action byte into action_code and response_required flag
-    action_code = action_byte & 0x0F
+    action_code = Hoi2Action(action_byte & 0x0F)
     response_required = bool(action_byte & 0x10)
 
     return cls(
@@ -237,7 +238,7 @@ class HoiPacket:
   """
 
   interface_id: int
-  action_code: int  # Base action code (0-15)
+  action_code: Hoi2Action
   action_id: int
   params: bytes  # Already DataFragment-wrapped via HoiParams
   response_required: bool = False  # Controls bit 4 of action byte
@@ -279,7 +280,7 @@ class HoiPacket:
     params = r.remaining()
 
     # Decompose action byte into action_code and response_required flag
-    action_code = action_byte & 0x0F
+    action_code = Hoi2Action(action_byte & 0x0F)
     response_required = bool(action_byte & 0x10)
 
     return cls(

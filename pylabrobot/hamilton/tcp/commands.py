@@ -20,7 +20,7 @@ from pylabrobot.hamilton.tcp.messages import (
   split_hoi_params_after_warning_prefix,
 )
 from pylabrobot.hamilton.tcp.packets import Address
-from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol
+from pylabrobot.hamilton.tcp.protocol import HarpTransportableProtocol, Hoi2Action, TransportableProtocol
 from pylabrobot.hamilton.tcp.wire_types import HcResultEntry
 
 
@@ -35,7 +35,7 @@ class TCPCommand:
 
       @dataclass
       class MyCommand(TCPCommand):
-          protocol = HamiltonProtocol.OBJECT_DISCOVERY
+          protocol = TransportableProtocol.HARP2
           interface_id = 0
           command_id = 42
 
@@ -48,14 +48,14 @@ class TCPCommand:
   """
 
   # Class-level attributes that subclasses must override
-  protocol: Optional[HamiltonProtocol] = None
+  protocol: Optional[TransportableProtocol] = None
   interface_id: Optional[int] = None
   command_id: Optional[int] = None
 
   # Action configuration (can be overridden by subclasses)
-  action_code: int = 3  # Default: COMMAND_REQUEST
-  harp_protocol: int = 2  # Default: HOI2
-  ip_protocol: int = 6  # Default: OBJECT_DISCOVERY
+  action_code: Hoi2Action = Hoi2Action.COMMAND_REQUEST
+  harp_protocol: int = HarpTransportableProtocol.HOI2
+  ip_protocol: int = TransportableProtocol.HARP2
 
   def __init__(self, dest: Address):
     """Initialize TCP command.

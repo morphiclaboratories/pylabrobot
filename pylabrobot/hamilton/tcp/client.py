@@ -552,23 +552,25 @@ class HamiltonTCPClient(Driver):
         while True:
           response_message = await self._read_one_message(timeout=read_timeout)
           assert isinstance(response_message, CommandResponse)
-          action = Hoi2Action(response_message.hoi.action_code)
-          if action is Hoi2Action.COMMAND_ACK:
-            logger.debug(
-              "%s COMMAND_ACK from %s; awaiting terminal response",
-              command.__class__.__name__,
-              response_message.harp.src,
-            )
-            continue
-          if action is Hoi2Action.EVENT:
+          if response_message.hoi.action_code is Hoi2Action.EVENT:
             logger.debug(
               "%s EVENT from %s; skipping past to await terminal response",
               command.__class__.__name__,
               response_message.harp.src,
             )
             continue
+          if command.action_code is Hoi2Action.STATUS_REQUEST:
+            break  # STATUS flows never generate COMMAND_ACK
+          if response_message.hoi.action_code is Hoi2Action.COMMAND_ACK:
+            logger.debug(
+              "%s COMMAND_ACK from %s; awaiting terminal response",
+              command.__class__.__name__,
+              response_message.harp.src,
+            )
+            continue
           break
 
+        action = response_message.hoi.action_code
         if action in (
           Hoi2Action.STATUS_EXCEPTION,
           Hoi2Action.COMMAND_EXCEPTION,

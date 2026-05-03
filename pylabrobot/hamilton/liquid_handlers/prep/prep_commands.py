@@ -17,9 +17,8 @@ from typing import Annotated, ClassVar, Optional, Set, Tuple
 
 from pylabrobot.capabilities.liquid_handling.standard import Aspiration
 from pylabrobot.hamilton.tcp.commands import TCPCommand
-from pylabrobot.hamilton.tcp.messages import HoiParams
 from pylabrobot.hamilton.tcp.packets import Address
-from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol
+from pylabrobot.hamilton.tcp.protocol import Hoi2Action, TransportableProtocol
 from pylabrobot.hamilton.tcp.wire_types import (
   F32,
   I8,
@@ -1236,9 +1235,10 @@ class PrepCommand(TCPCommand):
   """Base for all Prep instrument commands.
 
   Subclasses are dataclasses with optional ``dest: Address`` (kw-only,
-  defaulted) plus any ``Annotated`` payload fields.  ``build_parameters()``
-  calls ``HoiParams.from_struct(self)`` which serialises only ``Annotated``
-  fields, so ``dest`` is automatically excluded from the wire payload.
+  defaulted) plus any ``Annotated`` payload fields. ``build_parameters()``
+  is inherited from ``TCPCommand`` and serialises only ``Annotated`` fields
+  via ``HoiParams.from_struct``, so ``dest`` is automatically excluded from
+  the wire payload.
 
   Firmware target is declared via the class-level ``firmware_path`` attribute;
   ``PrepDriver.send_command`` resolves it JIT. Polymorphic-dest commands (e.g.
@@ -1246,7 +1246,7 @@ class PrepCommand(TCPCommand):
   and require callers to pass an explicit ``dest=``.
   """
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 1
 
   # Declared by each concrete subclass. None means "caller must supply dest=".
@@ -1266,9 +1266,6 @@ class PrepCommand(TCPCommand):
 
   def __post_init__(self):
     super().__init__(self.dest)
-
-  def build_parameters(self) -> HoiParams:
-    return HoiParams.from_struct(self)
 
   def _channel_index_for_entry(self, entry_index: int, entry: HcResultEntry) -> Optional[int]:
     """Map HoiResult entry → 0-indexed channel via the first per-channel struct-array field.
@@ -1297,14 +1294,14 @@ class PrepCommand(TCPCommand):
 
 @dataclass
 class PrepStatusRequest(PrepCommand):
-  """Base for Prep commands that use HOI STATUS_REQUEST (``action_code == 0``).
+  """Base for Prep commands that use HOI STATUS_REQUEST (``action_code == Hoi2Action.STATUS_REQUEST``).
 
   Subclasses target various firmware objects (Pipettor, MLPrep, MLPrepService,
   DeckConfiguration, calibration, etc.). Responses still use the default
   ``response_required=True`` in :meth:`TCPCommand.build`.
   """
 
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
 
 @dataclass
@@ -1320,7 +1317,7 @@ class PrepProbeRequest(PrepCommand):
   so :meth:`TCPCommand.build` picks up the per-instance values correctly.
   """
 
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
   firmware_path = None
   dest: Address
   command_id: int

@@ -217,11 +217,16 @@ class Nimbus(Device):
     y_ch1: float,
     y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
+    core_front_channel: Optional[int] = None,
     backend_params: Optional[BackendParams] = None,
   ) -> NimbusGripperArm:
-    """Pick up the CoRe gripper tools and return the mounted arm."""
+    """Pick up the CoRe gripper tools and return the mounted arm.
+
+    Args:
+      core_front_channel: Forwarded to :meth:`NimbusCoreGripper.pick_up_tool` — 0-based
+        ``front`` channel index (same as STAR ``front_channel``). If ``None`` (default),
+        ``front = num_channels - 1`` and ``rear = front - 1`` (outermost adjacent pair).
+    """
     if self._core_gripper_arm is not None:
       raise RuntimeError("CoRe grippers already mounted")
     if self._core_factory is None or self.pip is None:
@@ -235,8 +240,7 @@ class Nimbus(Device):
       x=x,
       y_ch1=y_ch1,
       y_ch2=y_ch2,
-      channel1=channel1,
-      channel2=channel2,
+      core_front_channel=core_front_channel,
       backend_params=backend_params,
     )
 
@@ -251,11 +255,15 @@ class Nimbus(Device):
     y_ch1: float,
     y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
+    core_front_channel: Optional[int] = None,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
-    """Drop the CoRe gripper tools back to their parking position."""
+    """Drop the CoRe gripper tools back to their parking position.
+
+    Args:
+      core_front_channel: Must match the pair used at pickup when tools are mounted,
+        or pass ``None`` to let the backend use the stored mounted front channel.
+    """
     if self._core_gripper_arm is None:
       return
     backend = self._core_gripper_arm.backend
@@ -265,8 +273,7 @@ class Nimbus(Device):
         x=x,
         y_ch1=y_ch1,
         y_ch2=y_ch2,
-        channel1=channel1,
-        channel2=channel2,
+        core_front_channel=core_front_channel,
         backend_params=backend_params,
       )
     finally:
@@ -279,18 +286,20 @@ class Nimbus(Device):
     y_ch1: float,
     y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
+    core_front_channel: Optional[int] = None,
     pickup_params: Optional[BackendParams] = None,
     drop_params: Optional[BackendParams] = None,
   ) -> AsyncIterator[NimbusGripperArm]:
-    """Context manager: pick up CoRe grippers, yield the arm, then return the tools."""
+    """Context manager: pick up CoRe grippers, yield the arm, then return the tools.
+
+    See :meth:`pick_up_core_grippers` for ``core_front_channel`` (0-based ``front``;
+    default ``None`` → ``front = num_channels - 1``, ``rear = front - 1``).
+    """
     arm = await self.pick_up_core_grippers(
       x=x,
       y_ch1=y_ch1,
       y_ch2=y_ch2,
-      channel1=channel1,
-      channel2=channel2,
+      core_front_channel=core_front_channel,
       backend_params=pickup_params,
     )
     try:
@@ -300,8 +309,7 @@ class Nimbus(Device):
         x=x,
         y_ch1=y_ch1,
         y_ch2=y_ch2,
-        channel1=channel1,
-        channel2=channel2,
+        core_front_channel=core_front_channel,
         backend_params=drop_params,
       )
 

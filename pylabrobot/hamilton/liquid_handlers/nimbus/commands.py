@@ -14,11 +14,12 @@ from typing import Annotated, ClassVar, List, Optional, Set
 from pylabrobot.hamilton.tcp.commands import TCPCommand
 
 from pylabrobot.hamilton.tcp.packets import Address
-from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol
+from pylabrobot.hamilton.tcp.protocol import Hoi2Action, TransportableProtocol
 from pylabrobot.hamilton.tcp.wire_types import (
   I32,
   U8,
   U16,
+  U32,
   Bool,
   BoolArray,
   Enum,
@@ -53,7 +54,7 @@ class NimbusCommand(TCPCommand):
   explicit ``dest=`` at construction.
   """
 
-  protocol = HamiltonProtocol.OBJECT_DISCOVERY
+  protocol = TransportableProtocol.HARP2
   interface_id = 1
 
   firmware_path: ClassVar[Optional[str]] = None
@@ -185,7 +186,7 @@ class IsDoorLocked(NimbusCommand):
 
   command_id = 3
   firmware_path = "NimbusCORE.DoorLock"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   @dataclass
   class Response:
@@ -225,7 +226,7 @@ class IsInitialized(NimbusCommand):
 
   command_id = 14
   firmware_path = "NimbusCORE"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   @dataclass
   class Response:
@@ -238,7 +239,7 @@ class IsTipPresent(NimbusCommand):
 
   command_id = 16
   firmware_path = "NimbusCORE.Pipette"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   @dataclass
   class Response:
@@ -274,7 +275,7 @@ class ChannelConfiguration(NimbusCommand):
 
   command_id = 30
   firmware_path = "NimbusCORE"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   @dataclass
   class Response:
@@ -310,7 +311,7 @@ class GetChannelConfiguration(NimbusCommand):
 
   command_id = 66
   firmware_path = "NimbusCORE.Pipette"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   channel: U16
   indexes: I16Array
@@ -452,7 +453,7 @@ class IsCoreGripperToolHeld(NimbusCommand):
 
   command_id = 17
   firmware_path = "NimbusCORE.Pipette"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   @dataclass
   class Response:
@@ -466,7 +467,7 @@ class IsCoreGripperPlateGripped(NimbusCommand):
 
   command_id = 18
   firmware_path = "NimbusCORE.Pipette"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   @dataclass
   class Response:
@@ -485,7 +486,7 @@ class GetPosition(NimbusCommand):
 
   command_id = 20
   firmware_path = "NimbusCORE.Pipette"
-  action_code = 0
+  action_code = Hoi2Action.STATUS_REQUEST
 
   @dataclass
   class Response:

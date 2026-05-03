@@ -61,10 +61,10 @@ from pylabrobot.hamilton.tcp.packets import (
   encode_version_byte,
 )
 from pylabrobot.hamilton.tcp.protocol import (
-  HamiltonProtocol,
   Hoi2Action,
   RegistrationActionCode,
   RegistrationOptionType,
+  TransportableProtocol,
 )
 from pylabrobot.hamilton.tcp.wire_types import (
   I32,
@@ -129,19 +129,19 @@ class TestPacketWireShape(unittest.TestCase):
       dst=Address(1, 1, 257),
       seq=7,
       protocol=2,
-      action_code=3,
+      action_code=Hoi2Action.COMMAND_REQUEST,
       payload=b"\x01",
       response_required=True,
     )
     self.assertEqual(original.action, 0x13)
     unpacked = HarpPacket.unpack(original.pack())
-    self.assertEqual(unpacked.action_code, 3)
+    self.assertEqual(unpacked.action_code, Hoi2Action.COMMAND_REQUEST)
     self.assertTrue(unpacked.response_required)
 
   def test_hoi_fragment_count_reflects_fragmented_params(self):
     frag1 = b"\x03\x00\x04\x00" + b"\x01\x02\x03\x04"
     frag2 = b"\x04\x00\x01\x00" + b"\x05"
-    packet = HoiPacket(interface_id=1, action_code=3, action_id=9, params=frag1 + frag2)
+    packet = HoiPacket(interface_id=1, action_code=Hoi2Action.COMMAND_REQUEST, action_id=9, params=frag1 + frag2)
     packed = packet.pack()
     self.assertEqual(packed[5], 2)
 
@@ -254,7 +254,7 @@ class TestMessageBuildersAndParsers(unittest.TestCase):
 class TestTCPCommandBehavior(unittest.TestCase):
   def test_build_requires_source_address(self):
     class Cmd(TCPCommand):
-      protocol = HamiltonProtocol.OBJECT_DISCOVERY
+      protocol = TransportableProtocol.HARP2
       interface_id = 0
       command_id = 1
 
@@ -263,7 +263,7 @@ class TestTCPCommandBehavior(unittest.TestCase):
 
   def test_interpret_response_auto_decodes_nested_response(self):
     class Cmd(TCPCommand):
-      protocol = HamiltonProtocol.OBJECT_DISCOVERY
+      protocol = TransportableProtocol.HARP2
       interface_id = 1
       command_id = 0
 
@@ -281,7 +281,7 @@ class TestTCPCommandBehavior(unittest.TestCase):
       dst=Address(0, 0, 0),
       seq=0,
       protocol=2,
-      action_code=4,
+      action_code=Hoi2Action.COMMAND_RESPONSE,
       payload=hoi.pack(),
     )
     response = CommandResponse.from_bytes(IpPacket(protocol=6, payload=harp.pack()).pack())
@@ -312,7 +312,7 @@ class TestTransportApiAlignment(unittest.TestCase):
 
   def test_send_query_returns_hoi_payload_tuple(self):
     class Cmd(TCPCommand):
-      protocol = HamiltonProtocol.OBJECT_DISCOVERY
+      protocol = TransportableProtocol.HARP2
       interface_id = 0
       command_id = 1
 
@@ -331,7 +331,7 @@ class TestTransportApiAlignment(unittest.TestCase):
           dst=Address(2, 1, 65535),
           seq=1,
           protocol=2,
-          action_code=4,
+          action_code=Hoi2Action.COMMAND_RESPONSE,
           payload=hoi.pack(),
         )
         return CommandResponse.from_bytes(IpPacket(protocol=6, payload=harp.pack()).pack())
@@ -502,7 +502,7 @@ class TestErrorEntryChannelDetection(unittest.TestCase):
 
   @dataclass
   class _CmdPrep(TCPCommand):
-    protocol = HamiltonProtocol.OBJECT_DISCOVERY
+    protocol = TransportableProtocol.HARP2
     interface_id = 1
     command_id = 1
     dest: Address
@@ -519,7 +519,7 @@ class TestErrorEntryChannelDetection(unittest.TestCase):
 
   @dataclass
   class _CmdVoid(TCPCommand):
-    protocol = HamiltonProtocol.OBJECT_DISCOVERY
+    protocol = TransportableProtocol.HARP2
     interface_id = 1
     command_id = 35
     dest: Address
@@ -533,7 +533,7 @@ class TestErrorEntryChannelDetection(unittest.TestCase):
 
   @dataclass
   class _CmdNimbus(TCPCommand):
-    protocol = HamiltonProtocol.OBJECT_DISCOVERY
+    protocol = TransportableProtocol.HARP2
     interface_id = 1
     command_id = 4
     dest: Address
@@ -561,7 +561,7 @@ class TestSendCommandStatusException(unittest.IsolatedAsyncioTestCase):
 
     @dataclass
     class CmdVoid(TCPCommand):
-      protocol = HamiltonProtocol.OBJECT_DISCOVERY
+      protocol = TransportableProtocol.HARP2
       interface_id = 1
       command_id = 35
       dest: Address
@@ -586,7 +586,7 @@ class TestSendCommandStatusException(unittest.IsolatedAsyncioTestCase):
           dst=Address(2, 1, 65535),
           seq=1,
           protocol=2,
-          action_code=4,
+          action_code=Hoi2Action.COMMAND_RESPONSE,
           payload=hoi.pack(),
         )
         return CommandResponse.from_bytes(IpPacket(protocol=6, payload=harp.pack()).pack())
@@ -608,7 +608,7 @@ class TestSendCommandStatusException(unittest.IsolatedAsyncioTestCase):
 
     @dataclass
     class CmdPick(TCPCommand):
-      protocol = HamiltonProtocol.OBJECT_DISCOVERY
+      protocol = TransportableProtocol.HARP2
       interface_id = 1
       command_id = 4
       dest: Address
@@ -634,7 +634,7 @@ class TestSendCommandStatusException(unittest.IsolatedAsyncioTestCase):
           dst=Address(2, 1, 65535),
           seq=1,
           protocol=2,
-          action_code=4,
+          action_code=Hoi2Action.COMMAND_RESPONSE,
           payload=hoi.pack(),
         )
         return CommandResponse.from_bytes(IpPacket(protocol=6, payload=harp.pack()).pack())

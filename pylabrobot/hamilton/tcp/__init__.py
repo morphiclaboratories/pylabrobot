@@ -39,12 +39,12 @@ from pylabrobot.hamilton.tcp.packets import (
 from pylabrobot.hamilton.tcp.protocol import (
   HAMILTON_PROTOCOL_VERSION_MAJOR,
   HAMILTON_PROTOCOL_VERSION_MINOR,
-  HamiltonProtocol,
   HarpTransportableProtocol,
   Hoi2Action,
   HoiRequestId,
   RegistrationActionCode,
   RegistrationOptionType,
+  TransportableProtocol,
 )
 from pylabrobot.hamilton.tcp.wire_types import HamiltonDataType
 
@@ -69,7 +69,7 @@ __all__ = [
   "TCPCommand",
   "HamiltonTCPClient",
   "HamiltonDataType",
-  "HamiltonProtocol",
+  "TransportableProtocol",
   "HarpPacket",
   "HarpTransportableProtocol",
   "Hoi2Action",

@@ -34,6 +34,7 @@ from pylabrobot.hamilton.tcp.protocol import (
   HarpTransportableProtocol,
   Hoi2Action,
   RegistrationOptionType,
+  TransportableProtocol,
 )
 from pylabrobot.hamilton.tcp.wire_types import (
   HcResultEntry,
@@ -528,9 +529,9 @@ class CommandMessage:
     interface_id: int,
     method_id: int,
     params: HoiParams,
-    action_code: int = 3,  # Default: COMMAND_REQUEST
-    harp_protocol: int = 2,  # Default: HOI2
-    ip_protocol: int = 6,  # Default: OBJECT_DISCOVERY
+    action_code: Hoi2Action = Hoi2Action.COMMAND_REQUEST,
+    harp_protocol: int = HarpTransportableProtocol.HOI2,
+    ip_protocol: int = TransportableProtocol.HARP2,
   ):
     """Initialize command message.
 
@@ -538,9 +539,9 @@ class CommandMessage:
       dest: Destination object address
       interface_id: Interface ID (typically 0 for main interface, 1 for extended)
       method_id: Method/action ID to invoke
-      action_code: HOI action code (default 3=COMMAND_REQUEST)
-      harp_protocol: HARP protocol identifier (default 2=HOI2)
-      ip_protocol: IP protocol identifier (default 6=OBJECT_DISCOVERY)
+      action_code: HOI action code (default COMMAND_REQUEST)
+      harp_protocol: HARP payload protocol (default HarpTransportableProtocol.HOI2)
+      ip_protocol: Outer transport protocol (default TransportableProtocol.HARP2)
     """
     self.dest = dest
     self.interface_id = interface_id
@@ -611,8 +612,8 @@ class RegistrationMessage:
     dest: Address,
     action_code: int,
     response_code: int = 0,  # Default: no error
-    harp_protocol: int = 3,  # Default: Registration
-    ip_protocol: int = 6,  # Default: OBJECT_DISCOVERY
+    harp_protocol: int = HarpTransportableProtocol.REGISTRATION2,
+    ip_protocol: int = TransportableProtocol.HARP2,
   ):
     """Initialize registration message.
 
@@ -620,8 +621,8 @@ class RegistrationMessage:
       dest: Destination address (typically 0:0:65534 for registration service)
       action_code: Registration action code (e.g., 12=HARP_PROTOCOL_REQUEST)
       response_code: Response code (default 0=no error)
-      harp_protocol: HARP protocol identifier (default 3=Registration)
-      ip_protocol: IP protocol identifier (default 6=OBJECT_DISCOVERY)
+      harp_protocol: HARP payload protocol (default HarpTransportableProtocol.REGISTRATION2)
+      ip_protocol: Outer transport protocol (default TransportableProtocol.HARP2)
     """
     self.dest = dest
     self.action_code = action_code
@@ -656,7 +657,7 @@ class RegistrationMessage:
     req_addr: Address,
     res_addr: Address,
     seq: int,
-    harp_action_code: int = 3,  # Default: COMMAND_REQUEST
+    harp_action_code: Hoi2Action = Hoi2Action.COMMAND_REQUEST,
     harp_response_required: bool = True,  # Default: request with response
   ) -> bytes:
     """Build complete IP[HARP[Registration]] packet.
@@ -666,7 +667,7 @@ class RegistrationMessage:
       req_addr: Request address (for registration context)
       res_addr: Response address (for registration context)
       seq: Sequence number for this request
-      harp_action_code: HARP action code (default 3=COMMAND_REQUEST)
+      harp_action_code: HARP action code (default COMMAND_REQUEST)
       harp_response_required: Whether response required (default True)
 
     Returns:
@@ -702,8 +703,8 @@ class InitMessage:
   """Build Connection initialization messages.
 
   Creates complete IP[Connection] packets for establishing a connection
-  with the Hamilton instrument. Uses Protocol 7 (INITIALIZATION) which
-  has a different structure than HARP-based messages.
+  with the Hamilton instrument. Uses TransportableProtocol.CONNECTION2 (0x07)
+  which has a different structure than HARP-based messages.
 
   Example:
     msg = InitMessage(timeout=30)
@@ -715,7 +716,7 @@ class InitMessage:
     timeout: int = 30,
     connection_type: int = 1,  # Default: standard connection
     protocol_version: int = 0x30,  # Default: 3.0
-    ip_protocol: int = 7,  # Default: INITIALIZATION
+    ip_protocol: int = TransportableProtocol.CONNECTION2,
   ):
     """Initialize connection message.
 
@@ -723,7 +724,7 @@ class InitMessage:
       timeout: Connection timeout in seconds (default 30)
       connection_type: Connection type (default 1=standard)
       protocol_version: Protocol version byte (default 0x30=3.0)
-      ip_protocol: IP protocol identifier (default 7=INITIALIZATION)
+      ip_protocol: Outer transport protocol (default TransportableProtocol.CONNECTION2)
     """
     self.timeout = timeout
     self.connection_type = connection_type
