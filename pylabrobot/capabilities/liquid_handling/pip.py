@@ -9,6 +9,7 @@ from pylabrobot.resources.deck import Deck
 from pylabrobot.resources import (
   Container,
   Coordinate,
+  Deck,
   Plate,
   Tip,
   TipSpot,
