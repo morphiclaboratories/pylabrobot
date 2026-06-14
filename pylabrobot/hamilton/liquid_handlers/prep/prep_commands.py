@@ -18,7 +18,7 @@ from typing import Annotated, ClassVar, Optional, Set, Tuple
 from pylabrobot.capabilities.liquid_handling.standard import Aspiration
 from pylabrobot.hamilton.tcp.commands import TCPCommand
 from pylabrobot.hamilton.tcp.packets import Address
-from pylabrobot.hamilton.tcp.protocol import Hoi2Action, TransportableProtocol
+from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol, Hoi2Action
 from pylabrobot.hamilton.tcp.wire_types import (
   F32,
   I8,
@@ -1246,7 +1246,7 @@ class PrepCommand(TCPCommand):
   and require callers to pass an explicit ``dest=``.
   """
 
-  protocol = TransportableProtocol.HARP2
+  protocol = HamiltonProtocol.OBJECT_DISCOVERY
   interface_id = 1
 
   # Declared by each concrete subclass. None means "caller must supply dest=".

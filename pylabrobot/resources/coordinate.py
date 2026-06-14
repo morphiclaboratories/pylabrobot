@@ -27,14 +27,14 @@ class Coordinate(SerializableMixin):
   def zero() -> Coordinate:
     return Coordinate(0, 0, 0)
 
-  def __add__(self, other) -> Coordinate:
+  def __add__(self, other: Coordinate) -> Coordinate:
     return Coordinate(
       x=(self.x or 0) + (other.x or 0),
       y=(self.y or 0) + (other.y or 0),
       z=(self.z or 0) + (other.z or 0),
     )
 
-  def __sub__(self, other) -> Coordinate:
+  def __sub__(self, other: Coordinate) -> Coordinate:
     return Coordinate(
       x=(self.x or 0) - (other.x or 0),
       y=(self.y or 0) - (other.y or 0),

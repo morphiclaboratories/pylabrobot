@@ -5,10 +5,10 @@ import logging
 from typing import Dict, Generator, List, Literal, Optional, Sequence, Union
 
 from pylabrobot.capabilities.capability import BackendParams, Capability, need_capability_ready
+from pylabrobot.resources.deck import Deck
 from pylabrobot.resources import (
   Container,
   Coordinate,
-  Deck,
   Plate,
   Tip,
   TipSpot,
@@ -18,7 +18,7 @@ from pylabrobot.resources import (
   does_tip_tracking,
   does_volume_tracking,
 )
-from pylabrobot.resources.errors import HasTipError
+from pylabrobot.resources.errors import HasTipError, ResourceNotFoundError
 
 from .errors import BlowOutVolumeError, ChannelizedError
 from .pip_backend import PIPBackend
@@ -37,10 +37,16 @@ class PIP(Capability):
   See :doc:`/user_guide/capabilities/pip` for a walkthrough.
   """
 
-  def __init__(self, backend: PIPBackend, deck: Deck):
+  def __init__(
+    self,
+    backend: PIPBackend,
+    deck: Optional[Deck] = None,
+    default_trash: Optional[Trash] = None,
+  ):
     super().__init__(backend=backend)
     self.backend: PIPBackend = backend
     self.deck = deck
+    self.default_trash = default_trash
     self.head: Dict[int, TipTracker] = {}
     self._default_use_channels: Optional[List[int]] = None
     self._blow_out_air_volume: Optional[List[Optional[float]]] = None
@@ -329,7 +335,7 @@ class PIP(Capability):
   @need_capability_ready
   async def discard_tips(
     self,
-    trash: Trash,
+    trash: Optional[Trash] = None,
     use_channels: Optional[List[int]] = None,
     allow_nonzero_volume: bool = True,
     offsets: Optional[List[Coordinate]] = None,
@@ -338,12 +344,26 @@ class PIP(Capability):
     """Permanently discard tips in the trash.
 
     Args:
-      trash: The trash resource.
+      trash: The trash resource. If None, uses `default_trash` or deck trash area.
       use_channels: Channels to discard. If None, all channels with tips are used.
       allow_nonzero_volume: If True, discard even if the tip has liquid.
       offsets: List of offsets for each drop.
       drop_backend_params: Vendor-specific parameters for the drop.
     """
+    if trash is None:
+      if self.default_trash is not None:
+        trash = self.default_trash
+      elif self.deck is not None:
+        try:
+          trash = self.deck.get_trash_area()
+        except ResourceNotFoundError as e:
+          raise ValueError(
+            "No trash provided and deck has no trash area. Pass trash explicitly."
+          ) from e
+      else:
+        raise ValueError(
+          "No trash provided and no deck or default_trash set on PIP. Pass trash explicitly."
+        )
 
     if use_channels is None:
       use_channels = [c for c, t in self.head.items() if t.has_tip]
