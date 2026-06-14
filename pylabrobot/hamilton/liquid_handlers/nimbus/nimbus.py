@@ -85,7 +85,12 @@ class Nimbus(Device):
         num_channels=self.info.num_channels,
         channel_map=channel_map,
       )
-      self.pip = PIP(backend=pip_backend)
+      pip_trash = (
+        params.deck.get_resource(f"{params.deck.waste_type}_1")
+        if params.deck is not None and getattr(params.deck, "waste_type", None) is not None
+        else None
+      )
+      self.pip = PIP(backend=pip_backend, deck=params.deck, default_trash=pip_trash)
       self._capabilities = [self.pip]
       await self.pip._on_setup()
 
