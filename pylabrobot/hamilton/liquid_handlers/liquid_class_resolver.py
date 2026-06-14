@@ -89,13 +89,9 @@ def corrected_volumes_for_ops(
   n = len(ops)
   if len(hlcs) != n:
     raise ValueError(f"hlcs length must match ops ({n}), got {len(hlcs)}")
-  dvc = (
-    list(disable_volume_correction) if disable_volume_correction is not None else [False] * n
-  )
+  dvc = list(disable_volume_correction) if disable_volume_correction is not None else [False] * n
   if len(dvc) != n:
-    raise ValueError(
-      f"disable_volume_correction length must match ops ({n}), got {len(dvc)}"
-    )
+    raise ValueError(f"disable_volume_correction length must match ops ({n}), got {len(dvc)}")
   return [
     float(hlc.compute_corrected_volume(op.volume))
     if hlc is not None and not disabled
