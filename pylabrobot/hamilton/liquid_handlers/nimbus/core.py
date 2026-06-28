@@ -10,9 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from pylabrobot.capabilities.arms.arm import GripperArm
+from pylabrobot.capabilities.arms.arm import FixedAxisGripperArm
 from pylabrobot.capabilities.arms.backend import GripperArmBackend
-from pylabrobot.capabilities.arms.standard import GripperLocation
+from pylabrobot.capabilities.arms.standard import CartesianPose
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.resources import Coordinate, Resource
 
@@ -190,10 +190,18 @@ class NimbusCoreGripper(GripperArmBackend):
       )
     )
 
-  async def open_gripper(
-    self, gripper_width: float, backend_params: Optional[BackendParams] = None
+  min_gripper_width: float = 9.0
+  max_gripper_width: Optional[float] = None
+
+  async def move_gripper(
+    self,
+    width: float,
+    force_sensing: bool = False,
+    backend_params: Optional[BackendParams] = None,
   ) -> None:
     """Release plate / open CoRe gripper (ReleasePlate, cmd=14)."""
+    if force_sensing:
+      raise NotImplementedError("Use pick_up_at_location instead.")
     num_ch = self._pip.num_channels
     await self._driver.send_command(
       ReleasePlate(
@@ -201,11 +209,6 @@ class NimbusCoreGripper(GripperArmBackend):
         second_channel_number=num_ch,
       )
     )
-
-  async def close_gripper(
-    self, gripper_width: float, backend_params: Optional[BackendParams] = None
-  ) -> None:
-    raise NotImplementedError("Use pick_up_at_location instead.")
 
   async def is_gripper_closed(self, backend_params: Optional[BackendParams] = None) -> bool:
     raise NotImplementedError("NimbusCoreGripper does not support is_gripper_closed")
@@ -218,10 +221,10 @@ class NimbusCoreGripper(GripperArmBackend):
       "Tool management is handled by Nimbus.core_grippers() context manager."
     )
 
-  async def request_gripper_location(
+  async def request_gripper_pose(
     self, backend_params: Optional[BackendParams] = None
-  ) -> GripperLocation:
-    raise NotImplementedError("NimbusCoreGripper does not support request_gripper_location")
+  ) -> CartesianPose:
+    raise NotImplementedError("NimbusCoreGripper does not support request_gripper_pose")
 
   # -- Status queries ------------------------------------------------------------
 
@@ -297,7 +300,7 @@ class NimbusCoreGripper(GripperArmBackend):
     )
 
 
-class NimbusGripperArm(GripperArm):
+class NimbusGripperArm(FixedAxisGripperArm):
   """GripperArm that auto-populates Nimbus firmware geometry from the target resource.
 
   When ``pick_up_resource()`` is called, the plate width (Y-axis for Nimbus) is

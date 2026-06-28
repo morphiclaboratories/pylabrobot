@@ -36,6 +36,9 @@ from .commands import (
   _get_default_flow_rate,
   _get_tip_type_from_tip,
 )
+from .commands import (
+  Dispense as DispenseCommand,
+)
 
 if TYPE_CHECKING:
   from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck
