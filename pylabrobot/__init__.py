@@ -73,7 +73,7 @@ def setup_logger(log_dir: Optional[Union[Path, str]], level: int):
       logger.removeHandler(handler)
       # delete empty log file if it has been created
       log_file_path = Path(handler.baseFilename)
-      if log_file_path.exists() and log_file_path.stat().st_size == 0:
+      if log_file_path.is_file() and log_file_path.stat().st_size == 0:
         log_file_path.unlink()
 
   # Add a file handler, if log_dir is not None
