@@ -13,7 +13,6 @@ from .channels import (
 from .chatterbox import PrepChatterboxDriver, PrepChatterboxInstrumentInfo
 from .core import (
   PrepCoreGripper,
-  PrepCoreGripperFactory,
   PrepGripperArm,
 )
 from .driver import PrepDriver
@@ -39,7 +38,6 @@ __all__ = [
   "PrepChatterboxDriver",
   "PrepChatterboxInstrumentInfo",
   "PrepCoreGripper",
-  "PrepCoreGripperFactory",
   "PrepDriver",
   "PrepGripperArm",
   "PrepInstrumentInfo",

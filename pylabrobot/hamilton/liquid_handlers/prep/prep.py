@@ -17,7 +17,7 @@ from . import prep_commands as PrepCmd
 from .calibration import PrepCalibration
 from .channels import build_prep_channels
 from .chatterbox import PrepChatterboxDriver, PrepChatterboxInstrumentInfo
-from .core import PrepCoreGripper, PrepCoreGripperFactory, PrepGripperArm
+from .core import PrepCoreGripper, PrepGripperArm
 from .driver import PrepDriver
 from .setup_params import PrepSetupParams
 from .info import PrepInstrumentInfo
@@ -58,7 +58,6 @@ class Prep(Device):
     self.head8: Optional[Head8] = None
     self.method: Optional[PrepMethodLifecycle] = None
     self.calibration: Optional[PrepCalibration] = None
-    self._core_factory: Optional[PrepCoreGripperFactory] = None
 
   def _normalize_setup_params(self, backend_params: Optional[BackendParams]) -> PrepSetupParams:
     if backend_params is None:
@@ -113,8 +112,6 @@ class Prep(Device):
         )
         self.head8 = Head8(backend=mph_backend, deck=self.deck, default_trash=mph_trash)
         await self.head8._on_setup()
-
-      self._core_factory = PrepCoreGripperFactory(driver=self.driver)
 
       self._capabilities = [self.pip] + ([self.head8] if self.head8 is not None else [])
       self._setup_finished = True
@@ -172,7 +169,6 @@ class Prep(Device):
     self.head8 = None
     self.method = None
     self.calibration = None
-    self._core_factory = None
     self._setup_finished = False
 
   # -- CoRe grippers -----------------------------------------------------------
@@ -195,7 +191,7 @@ class Prep(Device):
     """Pick up the CoRe gripper tools and return the mounted arm."""
     if self._core_gripper_arm is not None:
       raise RuntimeError("CoRe grippers already mounted")
-    if self._core_factory is None or self.pip is None:
+    if self.pip is None:
       raise RuntimeError("Prep.setup() has not run.")
 
     mount = self.deck.get_resource("core_grippers")
@@ -207,7 +203,7 @@ class Prep(Device):
     loc = mount.get_location_wrt(self.deck)
     pip_backend = self.pip.backend
     assert isinstance(pip_backend, PrepPIPBackend)
-    backend = self._core_factory.build_backend(pip=pip_backend)
+    backend = PrepCoreGripper(driver=self.driver, pip=pip_backend)
 
     await backend.pick_up_tool(
       tool_position_x=loc.x,

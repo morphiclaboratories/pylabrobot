@@ -1,6 +1,6 @@
 from .channels import ChannelType, NimbusChannelConfig, NimbusChannelMap, Rail
 from .chatterbox import NimbusChatterboxDriver
-from .core import NimbusCoreGripper, NimbusCoreGripperFactory, NimbusGripperArm
+from .core import NimbusCoreGripper
 from .door import NimbusDoor
 from .driver import NimbusDriver
 from .setup_params import NimbusSetupParams
@@ -14,10 +14,8 @@ __all__ = [
   "NimbusChannelMap",
   "NimbusChatterboxDriver",
   "NimbusCoreGripper",
-  "NimbusCoreGripperFactory",
   "NimbusDoor",
   "NimbusDriver",
-  "NimbusGripperArm",
   "NimbusInstrumentInfo",
   "NimbusPIPBackend",
   "NimbusSetupParams",

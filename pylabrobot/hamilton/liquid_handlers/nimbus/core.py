@@ -1,4 +1,4 @@
-"""Hamilton Nimbus CoRe gripper backend and NimbusGripperArm frontend.
+"""Hamilton Nimbus CoRe gripper backend.
 
 CoRe gripper commands live on ``NimbusCORE.Pipette`` (cmd 9-14 and 17-18).
 Units: positions/widths in 0.01mm (INT32/UINT32 wire), speeds in 0.01mm/s (UINT32),
@@ -10,11 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from pylabrobot.capabilities.arms.arm import FixedAxisGripperArm
 from pylabrobot.capabilities.arms.backend import GripperArmBackend
 from pylabrobot.capabilities.arms.standard import CartesianPose
 from pylabrobot.capabilities.capability import BackendParams
-from pylabrobot.resources import Coordinate, Resource
+from pylabrobot.resources import Coordinate
 
 from .commands import (
   DropGripperTool,
@@ -42,17 +41,6 @@ def _mms(v: float) -> int:
   return round(v * 100)
 
 
-class NimbusCoreGripperFactory:
-  """Lightweight factory: :class:`Nimbus` constructs one at setup and calls
-  :meth:`build_backend` when tools are picked up."""
-
-  def __init__(self, driver: "NimbusDriver") -> None:
-    self._driver = driver
-
-  def build_backend(self, pip: "NimbusPIPBackend") -> "NimbusCoreGripper":
-    return NimbusCoreGripper(driver=self._driver, pip=pip)
-
-
 class NimbusCoreGripper(GripperArmBackend):
   """CoRe gripper backend for Nimbus.
 
@@ -65,16 +53,11 @@ class NimbusCoreGripper(GripperArmBackend):
 
   @dataclass
   class PickUpParams(BackendParams):
-    """Firmware parameters for plate pickup.
+    """Firmware parameters for plate pickup."""
 
-    Auto-populated from resource geometry by :class:`NimbusGripperArm.pick_up_resource`.
-    """
-
-    y_plate_width: float = 85.48
     y_open_position: float = 100.0
     y_grip_speed: float = 5.0
     y_grip_strength: float = 0.5
-    z_grip_height: float = 0.0
     z_final: float = 146.0
     z_speed: float = 50.0
 
@@ -199,9 +182,13 @@ class NimbusCoreGripper(GripperArmBackend):
     force_sensing: bool = False,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
-    """Release plate / open CoRe gripper (ReleasePlate, cmd=14)."""
-    if force_sensing:
-      raise NotImplementedError("Use pick_up_at_location instead.")
+    raise NotImplementedError(
+      "NimbusCoreGripper does not support width-based gripper control. "
+      "Use release_plate() to open the gripper."
+    )
+
+  async def release_plate(self, backend_params: Optional[BackendParams] = None) -> None:
+    """Open the CoRe gripper and release whatever is held (ReleasePlate, cmd=14)."""
     num_ch = self._pip.num_channels
     await self._driver.send_command(
       ReleasePlate(
@@ -300,26 +287,3 @@ class NimbusCoreGripper(GripperArmBackend):
     )
 
 
-class NimbusGripperArm(FixedAxisGripperArm):
-  """GripperArm that auto-populates Nimbus firmware geometry from the target resource.
-
-  When ``pick_up_resource()`` is called, the plate width (Y-axis for Nimbus) is
-  extracted from the :class:`Resource` automatically.
-  """
-
-  async def pick_up_resource(
-    self,
-    resource: Resource,
-    offset: Coordinate = Coordinate.zero(),
-    pickup_distance_from_bottom: Optional[float] = None,
-    backend_params: Optional[BackendParams] = None,
-  ):
-    if not isinstance(backend_params, NimbusCoreGripper.PickUpParams):
-      backend_params = NimbusCoreGripper.PickUpParams()
-
-    backend_params.y_plate_width = resource.get_absolute_size_y()
-
-    pdfb = self._resolve_pickup_distance(resource, pickup_distance_from_bottom)
-    backend_params.z_grip_height = pdfb
-
-    await super().pick_up_resource(resource, offset, pickup_distance_from_bottom, backend_params)

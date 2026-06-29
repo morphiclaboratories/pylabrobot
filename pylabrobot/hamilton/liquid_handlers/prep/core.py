@@ -18,17 +18,6 @@ if TYPE_CHECKING:
   from .pip_backend import PrepPIPBackend
 
 
-class PrepCoreGripperFactory:
-  """Lightweight factory: ``Prep`` constructs one at setup and calls
-  :meth:`build_backend` when tools are picked up."""
-
-  def __init__(self, driver: "PrepDriver") -> None:
-    self._driver = driver
-
-  def build_backend(self, pip: "PrepPIPBackend") -> "PrepCoreGripper":
-    return PrepCoreGripper(driver=self._driver, pip=pip)
-
-
 class PrepCoreGripper(GripperArmBackend):
   """CoRe gripper backend for Prep — translates v1 arm interface to PrepCmd firmware commands.
 
@@ -54,13 +43,15 @@ class PrepCoreGripper(GripperArmBackend):
     """Firmware parameters for plate pickup.
 
     Geometry fields are auto-populated by :class:`PrepGripperArm` when using
-    ``pick_up_resource()``.  Only tuning knobs (``clearance_y``, ``grip_speed_y``,
-    ``squeeze_mm``) normally need to be set by callers.
+    ``pick_up_resource()``.  When calling ``pick_up_at_location()`` directly,
+    all three geometry fields must be set explicitly — passing ``None`` will
+    raise.  Only tuning knobs (``clearance_y``, ``grip_speed_y``, ``squeeze_mm``)
+    have meaningful defaults for direct calls.
     """
 
-    resource_length: float = 127.0
-    resource_height: float = 14.0
-    plate_top_z_offset: float = 0.0
+    resource_length: Optional[float] = None
+    resource_height: Optional[float] = None
+    plate_top_z_offset: Optional[float] = None
     clearance_y: float = 2.5
     grip_speed_y: float = 5.0
     squeeze_mm: float = 2.0
@@ -95,6 +86,22 @@ class PrepCoreGripper(GripperArmBackend):
     """
     if not isinstance(backend_params, PrepCoreGripper.PickUpParams):
       backend_params = PrepCoreGripper.PickUpParams()
+
+    if backend_params.resource_length is None:
+      raise ValueError(
+        "PrepCoreGripper.PickUpParams.resource_length is required. "
+        "Use pick_up_resource() to derive it from the resource automatically."
+      )
+    if backend_params.resource_height is None:
+      raise ValueError(
+        "PrepCoreGripper.PickUpParams.resource_height is required. "
+        "Use pick_up_resource() to derive it from the resource automatically."
+      )
+    if backend_params.plate_top_z_offset is None:
+      raise ValueError(
+        "PrepCoreGripper.PickUpParams.plate_top_z_offset is required. "
+        "Use pick_up_resource() to derive it from the resource automatically."
+      )
 
     plate_top_center = PrepCmd.XYZCoord(
       default_values=False,
@@ -187,9 +194,13 @@ class PrepCoreGripper(GripperArmBackend):
     force_sensing: bool = False,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
-    """Release plate / open gripper (PrepReleasePlate, cmd=21)."""
-    if force_sensing:
-      raise NotImplementedError("Use pick_up_at_location instead.")
+    raise NotImplementedError(
+      "PrepCoreGripper does not support width-based gripper control. "
+      "Use release_plate() to open the gripper."
+    )
+
+  async def release_plate(self, backend_params: Optional[BackendParams] = None) -> None:
+    """Open the CoRe gripper and release whatever is held (PrepReleasePlate, cmd=21)."""
     await self._driver.send_command(PrepCmd.PrepReleasePlate())
 
   async def is_gripper_closed(self, backend_params: Optional[BackendParams] = None) -> bool:
@@ -267,15 +278,12 @@ class PrepGripperArm(FixedAxisGripperArm):
     if not isinstance(backend_params, PrepCoreGripper.PickUpParams):
       backend_params = PrepCoreGripper.PickUpParams()
 
-    # Auto-fill geometry from the actual resource
-    backend_params.resource_length = resource.get_absolute_size_x()
-    backend_params.resource_height = resource.get_absolute_size_z()
-
-    # plate_top_z_offset: how far above the grip point the plate top sits.
-    #   grip point = bottom + pickup_distance_from_bottom
-    #   plate top  = bottom + resource_height
-    #   offset     = resource_height - pickup_distance_from_bottom
     pdfb = self._resolve_pickup_distance(resource, pickup_distance_from_bottom)
-    backend_params.plate_top_z_offset = resource.get_absolute_size_z() - pdfb
+    if backend_params.resource_length is None:
+      backend_params.resource_length = resource.get_absolute_size_x()
+    if backend_params.resource_height is None:
+      backend_params.resource_height = resource.get_absolute_size_z()
+    if backend_params.plate_top_z_offset is None:
+      backend_params.plate_top_z_offset = resource.get_absolute_size_z() - pdfb
 
-    await super().pick_up_resource(resource, offset, pickup_distance_from_bottom, backend_params)
+    await super().pick_up_resource(resource, offset, pdfb, backend_params)

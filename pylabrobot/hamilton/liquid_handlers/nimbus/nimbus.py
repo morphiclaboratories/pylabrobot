@@ -6,15 +6,17 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
 
+from pylabrobot.capabilities.arms.arm import FixedAxisGripperArm
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.capabilities.liquid_handling.pip import PIP
 from pylabrobot.device import Device
+from pylabrobot.resources.hamilton.hamilton_decks import HamiltonCoreGrippers
 from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck
 
 from .channels import NimbusChannelMap
 from .chatterbox import NimbusChatterboxDriver
 from .commands import InitializeSmartRoll, Park, SetChannelConfiguration
-from .core import NimbusCoreGripper, NimbusCoreGripperFactory, NimbusGripperArm
+from .core import NimbusCoreGripper
 from .door import NimbusDoor
 from .driver import NimbusDriver
 from .info import NimbusInstrumentInfo
@@ -50,8 +52,7 @@ class Nimbus(Device):
     self.info: NimbusInstrumentInfo = NimbusInstrumentInfo(driver)
     self.pip: Optional[PIP] = None
     self.door: Optional[NimbusDoor] = None
-    self._core_factory: Optional[NimbusCoreGripperFactory] = None
-    self._core_gripper_arm: Optional[NimbusGripperArm] = None
+    self._core_gripper_arm: Optional[FixedAxisGripperArm] = None
 
   def _normalize_setup_params(self, backend_params: Optional[BackendParams]) -> NimbusSetupParams:
     if backend_params is None:
@@ -96,7 +97,6 @@ class Nimbus(Device):
       elif params.require_door_lock:
         raise RuntimeError("DoorLock is required but not available on this instrument.")
 
-      self._core_factory = NimbusCoreGripperFactory(driver=self.driver)
       self._setup_finished = True
     except Exception:
       await self.info._on_stop()
@@ -183,13 +183,12 @@ class Nimbus(Device):
     self._capabilities = []
     self.pip = None
     self.door = None
-    self._core_factory = None
     self._setup_finished = False
 
   # -- CoRe grippers ------------------------------------------------------------
 
   @property
-  def core_gripper_arm(self) -> NimbusGripperArm:
+  def core_gripper_arm(self) -> FixedAxisGripperArm:
     """The mounted CoRe gripper arm. Raises if grippers are not currently picked up."""
     if self._core_gripper_arm is None:
       raise RuntimeError(
@@ -202,62 +201,72 @@ class Nimbus(Device):
   def core_grippers_mounted(self) -> bool:
     return self._core_gripper_arm is not None
 
+  def _resolve_core_gripper_mount(self) -> HamiltonCoreGrippers:
+    """Look up the 'core_grippers' resource on the deck and validate its type."""
+    mount = self.deck.get_resource("core_grippers")
+    if not isinstance(mount, HamiltonCoreGrippers):
+      raise TypeError(
+        "deck must have a resource named 'core_grippers' of type HamiltonCoreGrippers. "
+        "Add core_grippers='1000uL-at-waste' to your NimbusDeck constructor."
+      )
+    return mount
+
   async def pick_up_core_grippers(
     self,
-    x: float,
-    y_ch1: float,
-    y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
     backend_params: Optional[BackendParams] = None,
-  ) -> NimbusGripperArm:
-    """Pick up the CoRe gripper tools and return the mounted arm."""
+  ) -> FixedAxisGripperArm:
+    """Pick up the CoRe gripper tools from the deck resource and return the mounted arm."""
     if self._core_gripper_arm is not None:
       raise RuntimeError("CoRe grippers already mounted")
-    if self._core_factory is None or self.pip is None:
+    if self.pip is None:
       raise RuntimeError("Nimbus.setup() has not run.")
+
+    mount = self._resolve_core_gripper_mount()
+    loc = mount.get_location_wrt(self.deck)
 
     pip_backend = self.pip.backend
     assert isinstance(pip_backend, NimbusPIPBackend)
-    backend = self._core_factory.build_backend(pip=pip_backend)
+    backend = NimbusCoreGripper(driver=self.driver, pip=pip_backend)
 
     await backend.pick_up_tool(
-      x=x,
-      y_ch1=y_ch1,
-      y_ch2=y_ch2,
-      channel1=channel1,
-      channel2=channel2,
+      x=loc.x,
+      y_ch1=loc.y + mount.back_channel_y_center,
+      y_ch2=loc.y + mount.front_channel_y_center,
+      channel1=1,
+      channel2=pip_backend.num_channels,
       backend_params=backend_params,
     )
 
-    self._core_gripper_arm = NimbusGripperArm(
+    self._core_gripper_arm = FixedAxisGripperArm(
       backend=backend, reference_resource=self.deck, grip_axis="y"
     )
     return self._core_gripper_arm
 
   async def return_core_grippers(
     self,
-    x: float,
-    y_ch1: float,
-    y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
     backend_params: Optional[BackendParams] = None,
   ) -> None:
-    """Drop the CoRe gripper tools back to their parking position."""
+    """Return the CoRe gripper tools to the deck resource position."""
     if self._core_gripper_arm is None:
       return
+
+    mount = self._resolve_core_gripper_mount()
+    loc = mount.get_location_wrt(self.deck)
+
+    pip_backend = self.pip.backend
+    assert isinstance(pip_backend, NimbusPIPBackend)
+
     backend = self._core_gripper_arm.backend
     assert isinstance(backend, NimbusCoreGripper)
     try:
       await backend.drop_tool(
-        x=x,
-        y_ch1=y_ch1,
-        y_ch2=y_ch2,
-        channel1=channel1,
-        channel2=channel2,
+        x=loc.x,
+        y_ch1=loc.y + mount.back_channel_y_center,
+        y_ch2=loc.y + mount.front_channel_y_center,
+        channel1=1,
+        channel2=pip_backend.num_channels,
         backend_params=backend_params,
       )
     finally:
@@ -266,35 +275,16 @@ class Nimbus(Device):
   @asynccontextmanager
   async def core_grippers(
     self,
-    x: float,
-    y_ch1: float,
-    y_ch2: float,
     *,
-    channel1: int = 1,
-    channel2: int = 8,
     pickup_params: Optional[BackendParams] = None,
     drop_params: Optional[BackendParams] = None,
-  ) -> AsyncIterator[NimbusGripperArm]:
-    """Context manager: pick up CoRe grippers, yield the arm, then return the tools."""
-    arm = await self.pick_up_core_grippers(
-      x=x,
-      y_ch1=y_ch1,
-      y_ch2=y_ch2,
-      channel1=channel1,
-      channel2=channel2,
-      backend_params=pickup_params,
-    )
+  ) -> AsyncIterator[FixedAxisGripperArm]:
+    """Context manager: pick up CoRe grippers from deck resource, yield the arm, then return."""
+    arm = await self.pick_up_core_grippers(backend_params=pickup_params)
     try:
       yield arm
     finally:
-      await self.return_core_grippers(
-        x=x,
-        y_ch1=y_ch1,
-        y_ch2=y_ch2,
-        channel1=channel1,
-        channel2=channel2,
-        backend_params=drop_params,
-      )
+      await self.return_core_grippers(backend_params=drop_params)
 
   # -- Convenience methods -------------------------------------------------------
 
