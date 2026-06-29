@@ -11,7 +11,8 @@ from pylabrobot.hamilton.tcp.introspection import ObjectInfo
 from pylabrobot.hamilton.tcp.packets import Address
 
 from .commands import NimbusCommand, _UNRESOLVED
-from .driver import NimbusDriver, NimbusSetupParams
+from .driver import NimbusDriver
+from .setup_params import NimbusSetupParams
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +39,6 @@ class NimbusChatterboxDriver(NimbusDriver):
     self._num_channels = num_channels
 
   async def setup(self, backend_params: Optional[BackendParams] = None):
-    if backend_params is None:
-      params = NimbusSetupParams()
-    elif isinstance(backend_params, NimbusSetupParams):
-      params = backend_params
-    else:
-      raise TypeError(
-        "NimbusChatterboxDriver.setup expected NimbusSetupParams | None for backend_params, "
-        f"got {type(backend_params).__name__}"
-      )
-    del params
-
     # Seed introspection registry with canned addresses (skip TCP connection entirely)
     self._nimbus_core_address = _CHATTERBOX_NIMBUS_CORE
     seed_paths = sorted(NimbusCommand._ALL_PATHS | set(_CHATTERBOX_PATH_TO_ADDR))

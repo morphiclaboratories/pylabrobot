@@ -16,7 +16,8 @@ from .core import (
   PrepCoreGripperFactory,
   PrepGripperArm,
 )
-from .driver import PrepDriver, PrepSetupParams
+from .driver import PrepDriver
+from .setup_params import PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
 from .mph_backend import PrepMPHBackend, PrepMPHDropTipsParams, PrepMPHPickUpTipsParams

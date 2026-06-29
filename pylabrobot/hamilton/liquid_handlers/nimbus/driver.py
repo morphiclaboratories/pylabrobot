@@ -13,7 +13,6 @@ introspection registry (cache-hot after the first hit).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any, Optional
 
 from pylabrobot.capabilities.capability import BackendParams
@@ -21,20 +20,12 @@ from pylabrobot.hamilton.tcp.client import HamiltonTCPClient
 from pylabrobot.hamilton.tcp.commands import TCPCommand
 from pylabrobot.hamilton.tcp.error_tables import NIMBUS_ERROR_CODES
 from pylabrobot.hamilton.tcp.packets import Address
-from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck
 
 from .commands import NimbusCommand, _UNRESOLVED
 
 logger = logging.getLogger(__name__)
 
 _EXPECTED_ROOT = "NimbusCORE"
-
-
-@dataclass
-class NimbusSetupParams(BackendParams):
-  deck: Optional[NimbusDeck] = None
-  require_door_lock: bool = False
-  force_initialize: bool = False
 
 
 class NimbusDriver(HamiltonTCPClient):
@@ -75,17 +66,6 @@ class NimbusDriver(HamiltonTCPClient):
 
   async def setup(self, backend_params: Optional[BackendParams] = None):
     """Open TCP connection, verify firmware root is NimbusCORE, resolve bootstrap handle."""
-    if backend_params is None:
-      params = NimbusSetupParams()
-    elif isinstance(backend_params, NimbusSetupParams):
-      params = backend_params
-    else:
-      raise TypeError(
-        "NimbusDriver.setup expected NimbusSetupParams | None for backend_params, "
-        f"got {type(backend_params).__name__}"
-      )
-    del params  # consumed by Nimbus / peers, not the transport
-
     await super().setup()
 
     root = await self._discovered_root_name()
@@ -106,7 +86,10 @@ class NimbusDriver(HamiltonTCPClient):
     if not roots:
       raise RuntimeError("No root objects discovered. Call setup() first.")
     info = await self.introspection.get_object(roots[0])
-    return info.name
+    name = info.name
+    if not isinstance(name, str):
+      raise RuntimeError(f"Unexpected root name type: {type(name).__name__}")
+    return name
 
   async def _send_raw(
     self,

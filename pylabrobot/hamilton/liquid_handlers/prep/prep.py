@@ -18,7 +18,8 @@ from .calibration import PrepCalibration
 from .channels import build_prep_channels
 from .chatterbox import PrepChatterboxDriver, PrepChatterboxInstrumentInfo
 from .core import PrepCoreGripper, PrepCoreGripperFactory, PrepGripperArm
-from .driver import PrepDriver, PrepSetupParams
+from .driver import PrepDriver
+from .setup_params import PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
 from .mph_backend import PrepMPHBackend

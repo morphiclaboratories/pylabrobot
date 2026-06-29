@@ -22,7 +22,6 @@ from ``MLPrepRoot``, not via a separate registry.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any, Optional
 
 from pylabrobot.capabilities.capability import BackendParams
@@ -33,6 +32,7 @@ from pylabrobot.hamilton.tcp.packets import Address
 
 from . import prep_commands as PrepCmd
 from .prep_commands import _UNRESOLVED, PrepCommand
+from .setup_params import PrepSetupParams  # re-exported for import compatibility
 
 logger = logging.getLogger(__name__)
 
@@ -42,16 +42,6 @@ _EXPECTED_ROOT = "MLPrepRoot"
 MLPREP_OBJECT_PATH = "MLPrepRoot.MLPrep"
 PIPETTOR_OBJECT_PATH = "MLPrepRoot.PipettorRoot.Pipettor"
 MPH_OBJECT_PATH = "MLPrepRoot.MphRoot.MPH"
-
-
-@dataclass
-class PrepSetupParams(BackendParams):
-  """TCP/pip setup flags. The Prep device's deck is supplied at construction, not here."""
-
-  smart: bool = True
-  force_initialize: bool = False
-  default_traverse_height: Optional[float] = None
-  use_v1_aspirate_dispense: bool = False
 
 
 class PrepDriver(HamiltonTCPClient):
@@ -93,17 +83,6 @@ class PrepDriver(HamiltonTCPClient):
   # ---------------------------------------------------------------------------
 
   async def setup(self, backend_params: Optional[BackendParams] = None):
-    if backend_params is None:
-      params = PrepSetupParams()
-    elif isinstance(backend_params, PrepSetupParams):
-      params = backend_params
-    else:
-      raise TypeError(
-        "PrepDriver.setup expected PrepSetupParams | None for backend_params, "
-        f"got {type(backend_params).__name__}"
-      )
-    del params  # consumed by Prep / peers, not the transport
-
     await super().setup()
 
     root = await self.discovered_root_name()

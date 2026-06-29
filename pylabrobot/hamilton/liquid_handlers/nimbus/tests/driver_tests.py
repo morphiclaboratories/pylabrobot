@@ -12,7 +12,10 @@ from pylabrobot.hamilton.liquid_handlers.nimbus.commands import (
   _UNRESOLVED,
 )
 from pylabrobot.hamilton.liquid_handlers.nimbus.driver import NimbusDriver
+from pylabrobot.hamilton.liquid_handlers.nimbus.nimbus import Nimbus
+from pylabrobot.hamilton.liquid_handlers.nimbus.setup_params import NimbusSetupParams
 from pylabrobot.hamilton.tcp.packets import Address
+from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck
 
 
 def test_chatterbox_setup_and_command_roundtrip():
@@ -90,5 +93,18 @@ def test_chatterbox_channel_configuration_returns_correct_types():
       assert cfg.channel_type == 1  # Channel300uL
       assert cfg.rail == i % 2  # alternating Left/Right
     await driver.stop()
+
+  asyncio.run(_run())
+
+
+def test_force_initialize_skips_is_initialized_check():
+  """When force_initialize=True, Nimbus.setup() never queries is_initialized."""
+  async def _run() -> None:
+    deck = NimbusDeck()
+    n = Nimbus(deck=deck, chatterbox=True)
+    n.info.is_initialized = AsyncMock(side_effect=AssertionError("should not be called"))
+    await n.setup(NimbusSetupParams(force_initialize=True))
+    n.info.is_initialized.assert_not_called()
+    await n.stop()
 
   asyncio.run(_run())

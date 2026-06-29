@@ -36,9 +36,6 @@ from .commands import (
   _get_default_flow_rate,
   _get_tip_type_from_tip,
 )
-from .commands import (
-  Dispense as DispenseCommand,
-)
 
 if TYPE_CHECKING:
   from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck
@@ -69,6 +66,75 @@ def _fill_in_defaults(val: Optional[List[T]], default: List[T]) -> List[T]:
   if len(val) != len(default):
     raise ValueError(f"Value length must equal num operations ({len(default)}), but is {len(val)}")
   return [v if v is not None else d for v, d in zip(val, default)]
+
+
+def _build_waste_position_params(
+  deck: "NimbusDeck",
+  num_channels: int,
+  traversal_height: float,
+  use_channels: List[int],
+  z_position_at_end_of_a_command: Optional[float] = None,
+  roll_distance: Optional[float] = None,
+) -> Tuple[List[int], List[int], List[int], List[int], List[int], List[int]]:
+  """Build waste position parameters for InitializeSmartRoll or DropTipsRoll.
+
+  Returns six full-length (num_channels) arrays: x, y, begin_deposit, end_deposit,
+  z_end, roll_distances — all in 0.01 mm wire units.
+  """
+  from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck as _NimbusDeck
+
+  if not isinstance(deck, _NimbusDeck):
+    raise RuntimeError("Deck must be a NimbusDeck for coordinate conversion")
+
+  x_positions_mm: List[float] = []
+  y_positions_mm: List[float] = []
+  z_positions_mm: List[float] = []
+
+  for channel_idx in use_channels:
+    if not hasattr(deck, "waste_type") or deck.waste_type is None:
+      raise RuntimeError(
+        f"Deck does not have waste_type attribute. "
+        f"Cannot determine waste position for channel {channel_idx}."
+      )
+    waste_pos_name = f"{deck.waste_type}_{channel_idx + 1}"
+    waste_pos = deck.get_resource(waste_pos_name)
+    abs_location = waste_pos.get_location_wrt(deck)
+    hamilton_coord = deck.to_hamilton_coordinate(abs_location)
+    x_positions_mm.append(hamilton_coord.x)
+    y_positions_mm.append(hamilton_coord.y)
+    z_positions_mm.append(hamilton_coord.z)
+
+  x_positions = [round(x * 100) for x in x_positions_mm]
+  y_positions = [round(y * 100) for y in y_positions_mm]
+
+  max_z_hamilton = max(z_positions_mm)
+  z_start_mm = max_z_hamilton + 4.0
+  z_stop_mm = max_z_hamilton
+
+  if z_position_at_end_of_a_command is None:
+    z_position_at_end_of_a_command = traversal_height
+  if roll_distance is None:
+    roll_distance = 9.0
+
+  begin_deposit = [round(z_start_mm * 100)] * len(use_channels)
+  end_deposit = [round(z_stop_mm * 100)] * len(use_channels)
+  z_end_list = [round(z_position_at_end_of_a_command * 100)] * len(use_channels)
+  roll_list = [round(roll_distance * 100)] * len(use_channels)
+
+  def _fill(values: List[int]) -> List[int]:
+    out = [0] * num_channels
+    for ch, v in zip(use_channels, values):
+      out[ch] = v
+    return out
+
+  return (
+    _fill(x_positions),
+    _fill(y_positions),
+    _fill(begin_deposit),
+    _fill(end_deposit),
+    _fill(z_end_list),
+    _fill(roll_list),
+  )
 
 
 # ---------------------------------------------------------------------------
@@ -221,43 +287,6 @@ class NimbusPIPBackend(PIPBackend):
   async def _on_stop(self):
     pass
 
-  async def _initialize_smart_roll(self):
-    """Configure channels and initialize SmartRoll with waste positions."""
-    self._ensure_deck()
-    # Set channel configuration for each channel
-    for channel in range(1, self.num_channels + 1):
-      await self.driver.send_command(
-        SetChannelConfiguration(
-          channel=channel,
-          indexes=[1, 3, 4],
-          enables=[True, False, False, False],
-        )
-      )
-    logger.info(f"Channel configuration set for {self.num_channels} channels")
-
-    # Initialize SmartRoll using waste positions
-    all_channels = list(range(self.num_channels))
-    (
-      x_positions_full,
-      y_positions_full,
-      begin_tip_deposit_process_full,
-      end_tip_deposit_process_full,
-      z_position_at_end_of_a_command_full,
-      roll_distances_full,
-    ) = self._build_waste_position_params(use_channels=all_channels)
-
-    await self.driver.send_command(
-      InitializeSmartRoll(
-        x_positions=x_positions_full,
-        y_positions=y_positions_full,
-        begin_tip_deposit_process=begin_tip_deposit_process_full,
-        end_tip_deposit_process=end_tip_deposit_process_full,
-        z_position_at_end_of_a_command=z_position_at_end_of_a_command_full,
-        roll_distances=roll_distances_full,
-      )
-    )
-    logger.info("NimbusCore initialized with InitializeSmartRoll successfully")
-
   # ---------------------------------------------------------------------------
   # Channel fill helper
   # ---------------------------------------------------------------------------
@@ -353,63 +382,6 @@ class NimbusPIPBackend(PIPBackend):
     end_position_full = self._fill_by_channels(end_position, use_channels, default=0)
 
     return begin_position_full, end_position_full
-
-  def _build_waste_position_params(
-    self,
-    use_channels: List[int],
-    z_position_at_end_of_a_command: Optional[float] = None,
-    roll_distance: Optional[float] = None,
-  ) -> Tuple[List[int], List[int], List[int], List[int], List[int], List[int]]:
-    """Build waste position parameters for InitializeSmartRoll or DropTipsRoll."""
-    from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck
-
-    if not isinstance(self.deck, NimbusDeck):
-      raise RuntimeError("Deck must be a NimbusDeck for coordinate conversion")
-
-    x_positions_mm: List[float] = []
-    y_positions_mm: List[float] = []
-    z_positions_mm: List[float] = []
-
-    for channel_idx in use_channels:
-      if not hasattr(self.deck, "waste_type") or self.deck.waste_type is None:
-        raise RuntimeError(
-          f"Deck does not have waste_type attribute. "
-          f"Cannot determine waste position for channel {channel_idx}."
-        )
-      waste_pos_name = f"{self.deck.waste_type}_{channel_idx + 1}"
-      waste_pos = self.deck.get_resource(waste_pos_name)
-      abs_location = waste_pos.get_location_wrt(self.deck)
-      hamilton_coord = self.deck.to_hamilton_coordinate(abs_location)
-
-      x_positions_mm.append(hamilton_coord.x)
-      y_positions_mm.append(hamilton_coord.y)
-      z_positions_mm.append(hamilton_coord.z)
-
-    x_positions = [round(x * 100) for x in x_positions_mm]
-    y_positions = [round(y * 100) for y in y_positions_mm]
-
-    max_z_hamilton = max(z_positions_mm)
-    z_start_absolute_mm = max_z_hamilton + 4.0
-    z_stop_absolute_mm = max_z_hamilton
-
-    if z_position_at_end_of_a_command is None:
-      z_position_at_end_of_a_command = self.traversal_height
-    if roll_distance is None:
-      roll_distance = 9.0
-
-    begin_tip_deposit_process = [round(z_start_absolute_mm * 100)] * len(use_channels)
-    end_tip_deposit_process = [round(z_stop_absolute_mm * 100)] * len(use_channels)
-    z_position_at_end_list = [round(z_position_at_end_of_a_command * 100)] * len(use_channels)
-    roll_distances = [round(roll_distance * 100)] * len(use_channels)
-
-    x_positions_full = self._fill_by_channels(x_positions, use_channels, default=0)
-    y_positions_full = self._fill_by_channels(y_positions, use_channels, default=0)
-    begin_full = self._fill_by_channels(begin_tip_deposit_process, use_channels, default=0)
-    end_full = self._fill_by_channels(end_tip_deposit_process, use_channels, default=0)
-    z_end_full = self._fill_by_channels(z_position_at_end_list, use_channels, default=0)
-    roll_full = self._fill_by_channels(roll_distances, use_channels, default=0)
-
-    return x_positions_full, y_positions_full, begin_full, end_full, z_end_full, roll_full
 
   # ---------------------------------------------------------------------------
   # PIPBackend interface
@@ -581,8 +553,11 @@ class NimbusPIPBackend(PIPBackend):
         end_tip_deposit_process_full,
         z_position_at_end_of_a_command_full,
         roll_distances_full,
-      ) = self._build_waste_position_params(
-        use_channels=use_channels,
+      ) = _build_waste_position_params(
+        self._ensure_deck(),
+        self.num_channels,
+        self.traversal_height,
+        use_channels,
         z_position_at_end_of_a_command=params.z_position_at_end_of_a_command,
         roll_distance=params.roll_distance,
       )

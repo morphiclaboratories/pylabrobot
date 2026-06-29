@@ -16,9 +16,10 @@ from .chatterbox import NimbusChatterboxDriver
 from .commands import InitializeSmartRoll, Park, SetChannelConfiguration
 from .core import NimbusCoreGripper, NimbusCoreGripperFactory, NimbusGripperArm
 from .door import NimbusDoor
-from .driver import NimbusDriver, NimbusSetupParams
+from .driver import NimbusDriver
 from .info import NimbusInstrumentInfo
-from .pip_backend import NimbusPIPBackend
+from .pip_backend import NimbusPIPBackend, _build_waste_position_params
+from .setup_params import NimbusSetupParams
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +55,8 @@ class Nimbus(Device):
 
   def _normalize_setup_params(self, backend_params: Optional[BackendParams]) -> NimbusSetupParams:
     if backend_params is None:
-      return NimbusSetupParams(deck=self.deck)
+      return NimbusSetupParams()
     if isinstance(backend_params, NimbusSetupParams):
-      if backend_params.deck is None:
-        return NimbusSetupParams(
-          deck=self.deck,
-          require_door_lock=backend_params.require_door_lock,
-          force_initialize=backend_params.force_initialize,
-        )
       return backend_params
     raise TypeError(
       "Nimbus.setup expected NimbusSetupParams | None for backend_params, "
@@ -80,17 +75,17 @@ class Nimbus(Device):
       pipette_address = await self.driver.resolve_path("NimbusCORE.Pipette")
       pip_backend = NimbusPIPBackend(
         driver=self.driver,
-        deck=params.deck,
+        deck=self.deck,
         address=pipette_address,
         num_channels=self.info.num_channels,
         channel_map=channel_map,
       )
       pip_trash = (
-        params.deck.get_resource(f"{params.deck.waste_type}_1")
-        if params.deck is not None and getattr(params.deck, "waste_type", None) is not None
+        self.deck.get_resource(f"{self.deck.waste_type}_1")
+        if self.deck is not None and getattr(self.deck, "waste_type", None) is not None
         else None
       )
-      self.pip = PIP(backend=pip_backend, deck=params.deck, default_trash=pip_trash)
+      self.pip = PIP(backend=pip_backend, deck=self.deck, default_trash=pip_trash)
       self._capabilities = [self.pip]
       await self.pip._on_setup()
 
@@ -135,7 +130,7 @@ class Nimbus(Device):
 
   async def _initialize_smart_roll(self, params: NimbusSetupParams) -> None:
     """Configure channels and run InitializeSmartRoll with waste positions."""
-    if params.deck is None:
+    if self.deck is None:
       raise RuntimeError("Deck must be provided to run InitializeSmartRoll.")
 
     num_channels = self.info.num_channels
@@ -149,15 +144,6 @@ class Nimbus(Device):
       )
     logger.info("Channel configuration set for %d channels", num_channels)
 
-    # Build a temporary pip_backend to use the waste coordinate helpers.
-    # The real one is constructed after this method returns.
-    pipette_address = await self.driver.resolve_path("NimbusCORE.Pipette")
-    temp_pip = NimbusPIPBackend(
-      driver=self.driver,
-      deck=params.deck,
-      address=pipette_address,
-      num_channels=num_channels,
-    )
     all_channels = list(range(num_channels))
     (
       x_positions,
@@ -166,7 +152,7 @@ class Nimbus(Device):
       end_tip_deposit,
       z_end,
       roll_distances,
-    ) = temp_pip._build_waste_position_params(use_channels=all_channels)
+    ) = _build_waste_position_params(self.deck, num_channels, 146.0, all_channels)
 
     await self.driver.send_command(
       InitializeSmartRoll(

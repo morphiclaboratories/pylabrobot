@@ -136,7 +136,7 @@ def test_partial_channel_pickup_raises_value_error():
   async def _run() -> None:
     deck, tip_rack, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     with pytest.raises(ValueError, match="fully-ganged head"):
@@ -159,7 +159,7 @@ def test_head8_present_after_chatterbox_setup():
   async def _run() -> None:
     deck, _, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
     assert isinstance(p.head8, Head8)
     await p.stop()
@@ -171,7 +171,7 @@ def test_head8_tip_tracker_commit_on_pickup():
   async def _run() -> None:
     deck, tip_rack, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     await p.head8.pick_up_tips(
@@ -191,7 +191,7 @@ def test_head8_tip_tracker_rollback_on_backend_error():
   async def _run() -> None:
     deck, tip_rack, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     async def _fail(*args, **kwargs):
@@ -219,7 +219,7 @@ def test_head8_volume_cleared_after_dispense():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     await p.head8.pick_up_tips(
@@ -251,7 +251,7 @@ def test_head8_full_flow_return_tips():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
@@ -270,7 +270,7 @@ def test_head8_spots_channels_length_mismatch_raises():
   async def _run() -> None:
     deck, tip_rack, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     with pytest.raises(ValueError, match="must equal len"):
@@ -315,7 +315,7 @@ def test_head8_move_to_position_sends_mph_wire_commands():
   async def _run() -> None:
     deck, _, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -350,7 +350,7 @@ def test_pick_up_tips_default_pre_position_sends_mph_move_then_pickup():
   async def _run() -> None:
     deck, tip_rack, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -382,7 +382,7 @@ def test_pick_up_tips_pre_position_false_skips_mph_move():
   async def _run() -> None:
     deck, tip_rack, _, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -416,7 +416,7 @@ def test_head8_partial_channel_aspirate_raises_value_error():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
@@ -444,7 +444,7 @@ def test_head8_v2_aspirate_sends_mphaspiratenolldmonitoring2():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -483,7 +483,7 @@ def test_head8_v2_dispense_sends_mphdispensetnolld2():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -520,7 +520,7 @@ def test_head8_v1_fallback_when_use_v1_flag_set():
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
     await p.setup(
-      PrepSetupParams(smart=True, force_initialize=False, use_v1_aspirate_dispense=True)
+      PrepSetupParams(use_v1_aspirate_dispense=True)
     )
     assert p.head8 is not None
 
@@ -572,7 +572,7 @@ def test_head8_aspirate_tadm_sends_mphaspirate_tadm2():
   async def _run() -> None:
     deck, tip_rack, src_plate, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -607,7 +607,7 @@ def test_head8_aspirate_clld_sends_mphaspirate_with_lld2():
   async def _run() -> None:
     deck, tip_rack, src_plate, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -640,7 +640,7 @@ def test_head8_aspirate_lld_and_tadm_sends_mphaspirate_with_lld_tadm2():
   async def _run() -> None:
     deck, tip_rack, src_plate, _ = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []
@@ -675,7 +675,7 @@ def test_head8_dispense_lld_pressure_raises():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     await p.head8.pick_up_tips(tip_spots=tip_rack.column(0))
@@ -699,7 +699,7 @@ def test_head8_command_version_override_v1():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(PrepSetupParams(smart=True, force_initialize=False))
+    await p.setup()
     assert p.head8 is not None
 
     captured: list[Any] = []

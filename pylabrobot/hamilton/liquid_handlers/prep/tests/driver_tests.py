@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from pylabrobot.hamilton.liquid_handlers.prep.chatterbox import PrepChatterboxDriver
-from pylabrobot.hamilton.liquid_handlers.prep.driver import PrepSetupParams
+from pylabrobot.hamilton.liquid_handlers.prep.setup_params import PrepSetupParams
 from pylabrobot.hamilton.liquid_handlers.prep.core import PrepCoreGripper, PrepGripperArm
 from pylabrobot.hamilton.liquid_handlers.prep import prep_commands as PrepCmd
 from pylabrobot.hamilton.liquid_handlers.prep.pip_backend import PrepPIPBackend
@@ -161,5 +161,20 @@ def test_chatterbox_preregisters_diagnostic_paths():
     assert isinstance(await d.resolve_path("MLPrepRoot.MLPrepCpu"), Address)
     assert isinstance(await d.resolve_path("MLPrepRoot.PipettorRoot.ModuleInformation"), Address)
     await d.stop()
+
+  asyncio.run(_run())
+
+
+def test_force_initialize_skips_is_initialized_check():
+  """When force_initialize=True, Prep.setup() never queries is_initialized."""
+  from unittest.mock import AsyncMock
+
+  async def _run() -> None:
+    deck = STARLetDeck()
+    p = Prep(deck=deck, chatterbox=True)
+    p.info.is_initialized = AsyncMock(side_effect=AssertionError("should not be called"))
+    await p.setup(PrepSetupParams(force_initialize=True))
+    p.info.is_initialized.assert_not_called()
+    await p.stop()
 
   asyncio.run(_run())
