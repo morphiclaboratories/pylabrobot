@@ -21,7 +21,7 @@ from pylabrobot.hamilton.tcp.commands import TCPCommand
 from pylabrobot.hamilton.tcp.error_tables import NIMBUS_ERROR_CODES
 from pylabrobot.hamilton.tcp.packets import Address
 
-from .commands import NimbusCommand, _UNRESOLVED
+from .commands import _UNRESOLVED, NimbusCommand
 
 logger = logging.getLogger(__name__)
 

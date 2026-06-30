@@ -2,12 +2,12 @@ import asyncio
 
 import pytest
 
-from pylabrobot.hamilton.liquid_handlers.prep.chatterbox import PrepChatterboxDriver
-from pylabrobot.hamilton.liquid_handlers.prep.setup_params import PrepSetupParams
-from pylabrobot.hamilton.liquid_handlers.prep.core import PrepCoreGripper, PrepGripperArm
 from pylabrobot.hamilton.liquid_handlers.prep import prep_commands as PrepCmd
+from pylabrobot.hamilton.liquid_handlers.prep.chatterbox import PrepChatterboxDriver
+from pylabrobot.hamilton.liquid_handlers.prep.core import PrepCoreGripper, PrepGripperArm
 from pylabrobot.hamilton.liquid_handlers.prep.pip_backend import PrepPIPBackend
 from pylabrobot.hamilton.liquid_handlers.prep.prep import Prep
+from pylabrobot.hamilton.liquid_handlers.prep.setup_params import PrepSetupParams
 from pylabrobot.hamilton.tcp.packets import Address
 from pylabrobot.resources.hamilton import STARLetDeck
 
@@ -172,7 +172,7 @@ def test_force_initialize_skips_is_initialized_check():
   async def _run() -> None:
     deck = STARLetDeck()
     p = Prep(deck=deck, chatterbox=True)
-    p.info.is_initialized = AsyncMock(side_effect=AssertionError("should not be called"))
+    p.info.is_initialized = AsyncMock(side_effect=AssertionError("should not be called"))  # type: ignore[method-assign]
     await p.setup(PrepSetupParams(force_initialize=True))
     p.info.is_initialized.assert_not_called()
     await p.stop()

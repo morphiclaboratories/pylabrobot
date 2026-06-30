@@ -808,8 +808,18 @@ class TestIntrospectionTypeParsers(unittest.TestCase):
     raw = [1, 57, 2, 1, 57, 4, 9, 0x22, 0x30, 0x31, 0x22, 0x20]
     parsed = introspection_mod._parse_method_param_types(raw)
     self.assertEqual(len(parsed), 3)
-    self.assertEqual([pt.wire_type for pt in parsed], [HamiltonDataType.I8, HamiltonDataType.STRUCTURE, HamiltonDataType.STRUCTURE])
-    self.assertEqual([pt.direction for pt in parsed], [introspection_mod.Direction.In, introspection_mod.Direction.In, introspection_mod.Direction.In])
+    self.assertEqual(
+      [pt.wire_type for pt in parsed],
+      [HamiltonDataType.I8, HamiltonDataType.STRUCTURE, HamiltonDataType.STRUCTURE],
+    )
+    self.assertEqual(
+      [pt.direction for pt in parsed],
+      [
+        introspection_mod.Direction.In,
+        introspection_mod.Direction.In,
+        introspection_mod.Direction.In,
+      ],
+    )
     self.assertEqual([pt._byte_width for pt in parsed], [1, 3, 8])
     self.assertEqual((parsed[1].source_id, parsed[1].ref_id), (2, 1))
     self.assertEqual((parsed[2].source_id, parsed[2].ref_id), (4, 9))
@@ -819,7 +829,10 @@ class TestIntrospectionTypeParsers(unittest.TestCase):
     raw = [40, 30, 2, 3, 30, 4, 7, 0x00, 0x01, 0x00, 0x02]
     parsed = introspection_mod._parse_struct_field_types(raw)
     self.assertEqual(len(parsed), 3)
-    self.assertEqual([pt.type_id for pt in parsed], [HamiltonDataType.F32, HamiltonDataType.STRUCTURE, HamiltonDataType.STRUCTURE])
+    self.assertEqual(
+      [pt.type_id for pt in parsed],
+      [HamiltonDataType.F32, HamiltonDataType.STRUCTURE, HamiltonDataType.STRUCTURE],
+    )
     self.assertEqual([pt._byte_width for pt in parsed], [1, 3, 7])
     self.assertEqual((parsed[1].source_id, parsed[1].ref_id), (2, 3))
     self.assertEqual((parsed[2].source_id, parsed[2].ref_id), (4, 7))
@@ -869,7 +882,9 @@ class TestHamiltonIntrospectionLazyCaches(unittest.IsolatedAsyncioTestCase):
 
   async def test_lazy_signature_loads_only_referenced_iface(self):
     st = StructInfo(struct_id=0, name="TipParams", fields={}, interface_id=1)
-    pt = introspection_mod.MethodParamType(HamiltonDataType.STRUCTURE, introspection_mod.Direction.In, source_id=2, ref_id=1)
+    pt = introspection_mod.MethodParamType(
+      HamiltonDataType.STRUCTURE, introspection_mod.Direction.In, source_id=2, ref_id=1
+    )
     m = MethodInfo(1, 0, 3, "Foo", [pt], ["p"], [], [])
     info = ObjectInfo(name="O", version="", method_count=1, subobject_count=0, address=self.addr)
     self.intro.get_object = AsyncMock(return_value=info)  # type: ignore[method-assign]
@@ -895,7 +910,9 @@ class TestHamiltonIntrospectionLazyCaches(unittest.IsolatedAsyncioTestCase):
 
   async def test_lazy_signature_matches_full_registry_for_local_struct(self):
     st = StructInfo(struct_id=0, name="TipParams", fields={}, interface_id=1)
-    pt = introspection_mod.MethodParamType(HamiltonDataType.STRUCTURE, introspection_mod.Direction.In, source_id=2, ref_id=1)
+    pt = introspection_mod.MethodParamType(
+      HamiltonDataType.STRUCTURE, introspection_mod.Direction.In, source_id=2, ref_id=1
+    )
     m = MethodInfo(1, 0, 3, "Foo", [pt], ["p"], [], [])
     info = ObjectInfo(name="O", version="", method_count=1, subobject_count=0, address=self.addr)
     self.intro.get_object = AsyncMock(return_value=info)  # type: ignore[method-assign]

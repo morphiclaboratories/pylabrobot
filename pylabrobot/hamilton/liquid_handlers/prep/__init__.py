@@ -16,7 +16,6 @@ from .core import (
   PrepGripperArm,
 )
 from .driver import PrepDriver
-from .setup_params import PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
 from .mph_backend import PrepMPHBackend, PrepMPHDropTipsParams, PrepMPHPickUpTipsParams
@@ -28,6 +27,7 @@ from .pip_backend import (
   PrepPIPPickUpTipsParams,
 )
 from .prep import Prep
+from .setup_params import PrepSetupParams
 
 __all__ = [
   "CalibrationCommandReport",

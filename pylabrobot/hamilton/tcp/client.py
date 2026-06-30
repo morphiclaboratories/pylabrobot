@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from typing import Any, Callable, ClassVar, Dict, Optional, Sequence, Tuple, Union, cast
 
 from pylabrobot.capabilities.capability import BackendParams
@@ -145,7 +144,9 @@ class HamiltonTCPClient(Driver):
     descriptor = await self._lookup_method_descriptor(addr, entry.interface_id, entry.action_id)
     if descriptor is None:
       return f"{path_part}, addr={addr}, iface={entry.interface_id}, action={entry.action_id}"
-    return f"{path_part}, addr={addr}, method={descriptor.id_string} {descriptor.signature_string()}"
+    return (
+      f"{path_part}, addr={addr}, method={descriptor.id_string} {descriptor.signature_string()}"
+    )
 
   async def _lookup_method_descriptor(
     self, addr: Address, interface_id: int, action_id: int

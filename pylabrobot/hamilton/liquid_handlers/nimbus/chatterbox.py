@@ -10,9 +10,8 @@ from pylabrobot.hamilton.tcp.commands import TCPCommand
 from pylabrobot.hamilton.tcp.introspection import ObjectInfo
 from pylabrobot.hamilton.tcp.packets import Address
 
-from .commands import NimbusCommand, _UNRESOLVED
+from .commands import _UNRESOLVED, NimbusCommand
 from .driver import NimbusDriver
-from .setup_params import NimbusSetupParams
 
 logger = logging.getLogger(__name__)
 

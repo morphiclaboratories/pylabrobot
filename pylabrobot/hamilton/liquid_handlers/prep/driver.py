@@ -32,7 +32,6 @@ from pylabrobot.hamilton.tcp.packets import Address
 
 from . import prep_commands as PrepCmd
 from .prep_commands import _UNRESOLVED, PrepCommand
-from .setup_params import PrepSetupParams  # re-exported for import compatibility
 
 logger = logging.getLogger(__name__)
 

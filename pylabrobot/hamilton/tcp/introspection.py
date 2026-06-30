@@ -81,7 +81,6 @@ class Direction(IntEnum):
   RetVal = 3
 
 
-
 async def _subobject_address_and_info(
   intro: "HamiltonIntrospection", parent_addr: Address, index: int
 ) -> Tuple[Address, ObjectInfo]:
@@ -165,37 +164,47 @@ class _HoiTypeRow:
 
 
 _HOI_TYPE_ROWS: tuple[_HoiTypeRow, ...] = (
-  _HoiTypeRow("i8",         (1, 17, 9, 25),       HamiltonDataType.I8),
-  _HoiTypeRow("i16",        (3, 19, 11, 27),      HamiltonDataType.I16),
-  _HoiTypeRow("i32",        (5, 21, 13, 29),      HamiltonDataType.I32),
-  _HoiTypeRow("u8",         (2, 18, 10, 26),      HamiltonDataType.U8),
-  _HoiTypeRow("u16",        (4, 20, 12, 28),      HamiltonDataType.U16),
-  _HoiTypeRow("u32",        (6, 22, 14, 30),      HamiltonDataType.U32),
-  _HoiTypeRow("str",        (7, 23, 15, 31),      HamiltonDataType.STRING),
-  _HoiTypeRow("bool",       (33, 35, 34, 36),     HamiltonDataType.BOOL),
-  _HoiTypeRow("List[i8]",   (37, 39, 38, 40),     HamiltonDataType.I8_ARRAY),
-  _HoiTypeRow("List[i16]",  (41, 43, 42, 44),     HamiltonDataType.I16_ARRAY),
-  _HoiTypeRow("List[i32]",  (49, 51, 50, 52),     HamiltonDataType.I32_ARRAY),
-  _HoiTypeRow("bytes",      (8, 24, 16, 32),      HamiltonDataType.U8_ARRAY),
-  _HoiTypeRow("List[u16]",  (45, 47, 46, 48),     HamiltonDataType.U16_ARRAY),
-  _HoiTypeRow("List[u32]",  (53, 55, 54, 56),     HamiltonDataType.U32_ARRAY),
-  _HoiTypeRow("List[bool]", (66, 68, 67, 69),     HamiltonDataType.BOOL_ARRAY),
-  _HoiTypeRow("HcResult",   (70, 72, 71, 73),     HamiltonDataType.HC_RESULT,   is_complex=True),
-  _HoiTypeRow("struct",     (57, 59, 58, 60),     HamiltonDataType.STRUCTURE,   is_complex=True, is_struct_kind=True),
-  _HoiTypeRow("List[struct]",(61, 63, 62, 64),    HamiltonDataType.STRUCTURE_ARRAY, is_complex=True, is_struct_kind=True),
-  _HoiTypeRow("List[str]",  (74, 76, 75, 77),     HamiltonDataType.STRING_ARRAY, is_complex=True),
-  _HoiTypeRow("enum",       (78, 80, 79, 81),     HamiltonDataType.ENUM,        is_complex=True, is_enum_kind=True),
-  _HoiTypeRow("List[enum]", (82, 84, 83, 85),     HamiltonDataType.ENUM_ARRAY,  is_complex=True, is_enum_kind=True),
-  _HoiTypeRow("i64",        (86, 88, 87, 89),     HamiltonDataType.I64),
-  _HoiTypeRow("u64",        (90, 92, 91, 93),     HamiltonDataType.U64),
-  _HoiTypeRow("f32",        (94, 96, 95, 97),     HamiltonDataType.F32),
-  _HoiTypeRow("f64",        (98, 100, 99, 101),   HamiltonDataType.F64),
-  _HoiTypeRow("List[i64]",  (102, 104, 103, 105), HamiltonDataType.I64_ARRAY),
-  _HoiTypeRow("List[u64]",  (106, 108, 107, 109), HamiltonDataType.U64_ARRAY),
-  _HoiTypeRow("List[f32]",  (110, 112, 111, 113), HamiltonDataType.F32_ARRAY),
-  _HoiTypeRow("List[f64]",  (114, 116, 115, 117), HamiltonDataType.F64_ARRAY),
-  _HoiTypeRow("HoiResult",  (118, 120, 119, 121), HamiltonDataType.HOI_RESULT, is_complex=True),
-  _HoiTypeRow("padding",    (0, 0, 0, 0),         HamiltonDataType.VOID),
+  _HoiTypeRow("i8", (1, 17, 9, 25), HamiltonDataType.I8),
+  _HoiTypeRow("i16", (3, 19, 11, 27), HamiltonDataType.I16),
+  _HoiTypeRow("i32", (5, 21, 13, 29), HamiltonDataType.I32),
+  _HoiTypeRow("u8", (2, 18, 10, 26), HamiltonDataType.U8),
+  _HoiTypeRow("u16", (4, 20, 12, 28), HamiltonDataType.U16),
+  _HoiTypeRow("u32", (6, 22, 14, 30), HamiltonDataType.U32),
+  _HoiTypeRow("str", (7, 23, 15, 31), HamiltonDataType.STRING),
+  _HoiTypeRow("bool", (33, 35, 34, 36), HamiltonDataType.BOOL),
+  _HoiTypeRow("List[i8]", (37, 39, 38, 40), HamiltonDataType.I8_ARRAY),
+  _HoiTypeRow("List[i16]", (41, 43, 42, 44), HamiltonDataType.I16_ARRAY),
+  _HoiTypeRow("List[i32]", (49, 51, 50, 52), HamiltonDataType.I32_ARRAY),
+  _HoiTypeRow("bytes", (8, 24, 16, 32), HamiltonDataType.U8_ARRAY),
+  _HoiTypeRow("List[u16]", (45, 47, 46, 48), HamiltonDataType.U16_ARRAY),
+  _HoiTypeRow("List[u32]", (53, 55, 54, 56), HamiltonDataType.U32_ARRAY),
+  _HoiTypeRow("List[bool]", (66, 68, 67, 69), HamiltonDataType.BOOL_ARRAY),
+  _HoiTypeRow("HcResult", (70, 72, 71, 73), HamiltonDataType.HC_RESULT, is_complex=True),
+  _HoiTypeRow(
+    "struct", (57, 59, 58, 60), HamiltonDataType.STRUCTURE, is_complex=True, is_struct_kind=True
+  ),
+  _HoiTypeRow(
+    "List[struct]",
+    (61, 63, 62, 64),
+    HamiltonDataType.STRUCTURE_ARRAY,
+    is_complex=True,
+    is_struct_kind=True,
+  ),
+  _HoiTypeRow("List[str]", (74, 76, 75, 77), HamiltonDataType.STRING_ARRAY, is_complex=True),
+  _HoiTypeRow("enum", (78, 80, 79, 81), HamiltonDataType.ENUM, is_complex=True, is_enum_kind=True),
+  _HoiTypeRow(
+    "List[enum]", (82, 84, 83, 85), HamiltonDataType.ENUM_ARRAY, is_complex=True, is_enum_kind=True
+  ),
+  _HoiTypeRow("i64", (86, 88, 87, 89), HamiltonDataType.I64),
+  _HoiTypeRow("u64", (90, 92, 91, 93), HamiltonDataType.U64),
+  _HoiTypeRow("f32", (94, 96, 95, 97), HamiltonDataType.F32),
+  _HoiTypeRow("f64", (98, 100, 99, 101), HamiltonDataType.F64),
+  _HoiTypeRow("List[i64]", (102, 104, 103, 105), HamiltonDataType.I64_ARRAY),
+  _HoiTypeRow("List[u64]", (106, 108, 107, 109), HamiltonDataType.U64_ARRAY),
+  _HoiTypeRow("List[f32]", (110, 112, 111, 113), HamiltonDataType.F32_ARRAY),
+  _HoiTypeRow("List[f64]", (114, 116, 115, 117), HamiltonDataType.F64_ARRAY),
+  _HoiTypeRow("HoiResult", (118, 120, 119, 121), HamiltonDataType.HOI_RESULT, is_complex=True),
+  _HoiTypeRow("padding", (0, 0, 0, 0), HamiltonDataType.VOID),
 )
 
 # HOI method-param type IDs that require extra source_id/ref_id bytes on the wire
@@ -226,7 +235,6 @@ for _row in _HOI_TYPE_ROWS:
 # Empirical: ID 113 (List[f32] RetVal column) observed as In argument on some firmware.
 # TODO: Re-validate against hardware captures and remove if no longer observed.
 _HOI_ID_TO_WIRE[113] = (HamiltonDataType.F32_ARRAY, Direction.In)
-
 
 
 # ============================================================================
@@ -328,7 +336,6 @@ def flatten_firmware_tree(node: FirmwareTreeNode) -> List[Tuple[str, Address, Ob
   return out
 
 
-
 @dataclass
 class MethodParamType:
   """A method parameter or return type from GetMethod, in the HOI introspection namespace.
@@ -426,11 +433,15 @@ def _parse_method_param_types(
         if end < len(ints) and ints[end] == _SPACE:
           end += 1  # consume trailing ' '
         result.append(
-          MethodParamType(wire_type, direction, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=end - i)
+          MethodParamType(
+            wire_type, direction, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=end - i
+          )
         )
         i = end
       else:
-        result.append(MethodParamType(wire_type, direction, source_id=source_id, ref_id=ref_id, _byte_width=3))
+        result.append(
+          MethodParamType(wire_type, direction, source_id=source_id, ref_id=ref_id, _byte_width=3)
+        )
         i += 3
     else:
       result.append(MethodParamType(wire_type, direction))
@@ -522,7 +533,9 @@ def _parse_struct_field_types(
       if source_id == _NODE_GLOBAL:
         # [type_id, 4, index, ModHi, ModLo, NodeHi, NodeLo] = 7 bytes
         result.append(
-          StructFieldType(wire_type, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=_NODE_GLOBAL_WIDTH)
+          StructFieldType(
+            wire_type, source_id=_NODE_GLOBAL, ref_id=ref_id, _byte_width=_NODE_GLOBAL_WIDTH
+          )
         )
         i += _NODE_GLOBAL_WIDTH
       else:
@@ -582,11 +595,7 @@ class MethodDescriptor:
       ret = self.returns[0]
       return_str = f"{ret.name}: {ret.type_name}" if ret.name != "ret0" else ret.type_name
     else:
-      return_str = (
-        "{ "
-        + ", ".join(f"{r.name}: {r.type_name}" for r in self.returns)
-        + " }"
-      )
+      return_str = "{ " + ", ".join(f"{r.name}: {r.type_name}" for r in self.returns) + " }"
 
     return f"{self.id_string} {self.name}({param_str}) -> {return_str}"
 
@@ -853,8 +862,7 @@ class StructInfo:
     """Serialize to a plain dict suitable for YAML/JSON export."""
     ho_iid = self.interface_id
     fields = {
-      name: sft.resolve_name(registry, ho_interface_id=ho_iid)
-      for name, sft in self.fields.items()
+      name: sft.resolve_name(registry, ho_interface_id=ho_iid) for name, sft in self.fields.items()
     }
     d: dict = {"name": self.name, "struct_id": self.struct_id, "fields": fields}
     if self.interface_id is not None:
@@ -951,7 +959,6 @@ class GlobalTypePool:
 #   - Complex references: 3 bytes [sentinel, source_id, ref_id]
 #     sentinel=30 for STRUCTURE, sentinel=32 for ENUM (matches piglet)
 #   The HamiltonDataType namespace is used here, NOT the introspection type namespace.
-
 
 
 # ============================================================================
@@ -1256,7 +1263,7 @@ class HamiltonIntrospection:
     seen_structs: Set[Tuple[int, int]] = set()
     max_nodes = 256
 
-    async def walk(types: List[Union[MethodParamType, StructFieldType]], ho_iface: int) -> None:
+    async def walk(types: Sequence[Union[MethodParamType, StructFieldType]], ho_iface: int) -> None:
       for pt in types:
         if pt.source_id is None or pt.ref_id is None:
           continue

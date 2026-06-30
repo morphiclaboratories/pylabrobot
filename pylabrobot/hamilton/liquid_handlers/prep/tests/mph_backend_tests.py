@@ -18,22 +18,21 @@ import pytest
 
 from pylabrobot.capabilities.liquid_handling.head8 import Head8
 from pylabrobot.hamilton.liquid_handlers.prep import Prep, PrepSetupParams
+from pylabrobot.hamilton.liquid_handlers.prep import prep_commands as PrepCmd
 from pylabrobot.hamilton.liquid_handlers.prep.mph_backend import (
-  LLDMode,
   PROBE_PITCH_MM,
+  LLDMode,
   PrepMPHAspirateParams,
-  PrepMPHDispenseParams,
   PrepMPHBackend,
+  PrepMPHDispenseParams,
   PrepMPHPickUpTipsParams,
 )
-from pylabrobot.hamilton.liquid_handlers.prep import prep_commands as PrepCmd
 from pylabrobot.hamilton.liquid_handlers.prep.pip_backend import (
   _build_pipettor_gantry_move_parameters,
 )
 from pylabrobot.resources import Coordinate
 from pylabrobot.resources.corning.axygen.plates import Cor_Axy_96_wellplate_500uL_Ub
 from pylabrobot.resources.hamilton import PrepDeck, hamilton_96_tiprack_50uL_NTR
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -519,9 +518,7 @@ def test_head8_v1_fallback_when_use_v1_flag_set():
   async def _run() -> None:
     deck, tip_rack, src_plate, dst_plate = _make_deck()
     p = Prep(deck=deck, chatterbox=True)
-    await p.setup(
-      PrepSetupParams(use_v1_aspirate_dispense=True)
-    )
+    await p.setup(PrepSetupParams(use_v1_aspirate_dispense=True))
     assert p.head8 is not None
 
     captured: list[Any] = []

@@ -12,19 +12,18 @@ from dataclasses import dataclass, field
 from typing import Annotated, ClassVar, List, Optional, Set
 
 from pylabrobot.hamilton.tcp.commands import TCPCommand
-
 from pylabrobot.hamilton.tcp.packets import Address
 from pylabrobot.hamilton.tcp.protocol import HamiltonProtocol
 from pylabrobot.hamilton.tcp.wire_types import (
   I32,
   U8,
   U16,
+  U32,
   Bool,
   BoolArray,
   Enum,
   I16Array,
   I32Array,
-  Struct,
   StructArray,
   U16Array,
   U32Array,

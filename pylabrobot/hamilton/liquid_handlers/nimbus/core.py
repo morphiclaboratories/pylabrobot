@@ -285,5 +285,3 @@ class NimbusCoreGripper(GripperArmBackend):
         second_channel_number=channel2,
       )
     )
-
-

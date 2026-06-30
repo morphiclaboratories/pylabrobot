@@ -12,6 +12,7 @@ from pylabrobot.capabilities.liquid_handling.pip import PIP
 from pylabrobot.device import Device
 from pylabrobot.resources.hamilton.hamilton_decks import HamiltonCoreGrippers
 from pylabrobot.resources.hamilton.nimbus_decks import NimbusDeck
+from pylabrobot.resources.trash import Trash
 
 from .channels import NimbusChannelMap
 from .chatterbox import NimbusChatterboxDriver
@@ -81,11 +82,11 @@ class Nimbus(Device):
         num_channels=self.info.num_channels,
         channel_map=channel_map,
       )
-      pip_trash = (
-        self.deck.get_resource(f"{self.deck.waste_type}_1")
-        if self.deck is not None and getattr(self.deck, "waste_type", None) is not None
-        else None
-      )
+      pip_trash: Trash | None = None
+      if self.deck is not None and getattr(self.deck, "waste_type", None) is not None:
+        waste = self.deck.get_resource(f"{self.deck.waste_type}_1")
+        if isinstance(waste, Trash):
+          pip_trash = waste
       self.pip = PIP(backend=pip_backend, deck=self.deck, default_trash=pip_trash)
       self._capabilities = [self.pip]
       await self.pip._on_setup()
@@ -225,6 +226,7 @@ class Nimbus(Device):
     mount = self._resolve_core_gripper_mount()
     loc = mount.get_location_wrt(self.deck)
 
+    assert self.pip is not None
     pip_backend = self.pip.backend
     assert isinstance(pip_backend, NimbusPIPBackend)
     backend = NimbusCoreGripper(driver=self.driver, pip=pip_backend)
@@ -255,6 +257,7 @@ class Nimbus(Device):
     mount = self._resolve_core_gripper_mount()
     loc = mount.get_location_wrt(self.deck)
 
+    assert self.pip is not None
     pip_backend = self.pip.backend
     assert isinstance(pip_backend, NimbusPIPBackend)
 

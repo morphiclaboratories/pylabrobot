@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 
 from pylabrobot.capabilities.capability import BackendParams
 from pylabrobot.hamilton.tcp.commands import TCPCommand
@@ -16,10 +16,10 @@ from .driver import (
   MPH_OBJECT_PATH,
   PIPETTOR_OBJECT_PATH,
   PrepDriver,
-  PrepSetupParams,
 )
 from .info import PrepInstrumentInfo
 from .prep_commands import PrepCommand
+from .setup_params import PrepSetupParams
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,12 @@ _V2_MPH_METHOD_IDS = frozenset(range(29, 35))
 class _PrepChatterboxIntrospection(HamiltonIntrospection):
   """Offline introspection: v2 probe succeeds when ``use_v1_aspirate_dispense`` is False."""
 
-  def __init__(self, *args, stub_methods_fn: Any, **kwargs):
+  def __init__(
+    self,
+    *args,
+    stub_methods_fn: Callable[[Address, int], Optional[List[MethodInfo]]],
+    **kwargs,
+  ):
     super().__init__(*args, **kwargs)
     self._stub_methods_fn = stub_methods_fn
 

@@ -34,6 +34,7 @@ if TYPE_CHECKING:
   from .info import PrepInstrumentInfo
 
 from pylabrobot.capabilities.capability import BackendParams
+from pylabrobot.capabilities.liquid_handling.errors import ChannelizedError
 from pylabrobot.capabilities.liquid_handling.pip_backend import PIPBackend
 from pylabrobot.capabilities.liquid_handling.standard import (
   Aspiration,
@@ -46,7 +47,6 @@ from pylabrobot.hamilton.liquid_handlers.liquid_class_resolver import (
   corrected_volumes_for_ops,
   resolve_hamilton_liquid_classes,
 )
-from pylabrobot.capabilities.liquid_handling.errors import ChannelizedError
 from pylabrobot.hamilton.tcp.hoi_error import HoiError
 from pylabrobot.resources import Coordinate, Tip
 from pylabrobot.resources.hamilton import HamiltonTip, TipSize
@@ -56,7 +56,6 @@ from pylabrobot.resources.trash import Trash
 from pylabrobot.resources.well import CrossSectionType, Well
 
 from . import prep_commands as PrepCmd
-from .driver import PIPETTOR_OBJECT_PATH
 from .channels import (
   ChannelDriveMap,
   PrepChannelBounds,
@@ -64,6 +63,7 @@ from .channels import (
   discover_channel_drives,
   request_channel_bounds,
 )
+from .driver import PIPETTOR_OBJECT_PATH
 
 logger = logging.getLogger(__name__)
 

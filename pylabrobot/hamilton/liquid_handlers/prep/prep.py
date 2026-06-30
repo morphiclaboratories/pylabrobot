@@ -19,11 +19,11 @@ from .channels import build_prep_channels
 from .chatterbox import PrepChatterboxDriver, PrepChatterboxInstrumentInfo
 from .core import PrepCoreGripper, PrepGripperArm
 from .driver import PrepDriver
-from .setup_params import PrepSetupParams
 from .info import PrepInstrumentInfo
 from .method import PrepMethodLifecycle
 from .mph_backend import PrepMPHBackend
 from .pip_backend import PrepPIPBackend
+from .setup_params import PrepSetupParams
 
 logger = logging.getLogger(__name__)
 
