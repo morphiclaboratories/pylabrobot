@@ -1,4 +1,7 @@
-﻿pylabrobot.resources.Plate
+﻿:orphan:
+
+
+pylabrobot.resources.Plate
 ==========================
 
 .. currentmodule:: pylabrobot.resources

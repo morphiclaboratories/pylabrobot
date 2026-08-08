@@ -1,4 +1,7 @@
-﻿pylabrobot.resources.TubeCarrier
+﻿:orphan:
+
+
+pylabrobot.resources.TubeCarrier
 ================================
 
 .. currentmodule:: pylabrobot.resources

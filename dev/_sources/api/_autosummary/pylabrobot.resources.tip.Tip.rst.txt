@@ -1,4 +1,7 @@
-﻿pylabrobot.resources.tip.Tip
+﻿:orphan:
+
+
+pylabrobot.resources.tip.Tip
 ============================
 
 .. currentmodule:: pylabrobot.resources.tip
@@ -13,6 +16,7 @@
       :toctree: .
    
       ~Tip.name
+      ~Tip.nominal_volume
       ~Tip.has_filter
       ~Tip.total_tip_length
       ~Tip.maximal_volume

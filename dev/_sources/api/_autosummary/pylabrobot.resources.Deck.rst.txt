@@ -1,4 +1,7 @@
-﻿pylabrobot.resources.Deck
+﻿:orphan:
+
+
+pylabrobot.resources.Deck
 =========================
 
 .. currentmodule:: pylabrobot.resources

@@ -1,4 +1,7 @@
-﻿pylabrobot.resources.PlateCarrier
+﻿:orphan:
+
+
+pylabrobot.resources.PlateCarrier
 =================================
 
 .. currentmodule:: pylabrobot.resources

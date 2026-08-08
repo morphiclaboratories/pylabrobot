@@ -1,4 +1,7 @@
-﻿pylabrobot.resources.TipCarrier
+﻿:orphan:
+
+
+pylabrobot.resources.TipCarrier
 ===============================
 
 .. currentmodule:: pylabrobot.resources

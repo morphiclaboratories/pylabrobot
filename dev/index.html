@@ -27,19 +27,19 @@
   </noscript>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="_static/styles/theme.css?digest=7f76b32a3354e82990f2" rel="stylesheet" />
-<link href="_static/styles/pydata-sphinx-theme.css?digest=7f76b32a3354e82990f2" rel="stylesheet" />
+  <link href="_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
     <link rel="stylesheet" type="text/css" href="_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" />
     <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
-    <link rel="stylesheet" type="text/css" href="_static/plr_cards.css?v=bbd25712" />
+    <link rel="stylesheet" type="text/css" href="_static/plr_cards.css?v=ed9dfa64" />
   
   <!-- So that users can add custom icons -->
-  <script defer src="_static/scripts/fontawesome.js?digest=7f76b32a3354e82990f2"></script>
+  <script defer src="_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=7f76b32a3354e82990f2" />
-<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=7f76b32a3354e82990f2" />
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
 
     <script src="_static/documentation_options.js?v=3ce10a4d"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
@@ -48,14 +48,14 @@
     <script src="_static/copybutton.js?v=f281be69"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'index';</script>
     <script>
-        DOCUMENTATION_OPTIONS.theme_version = '0.17.0';
+        DOCUMENTATION_OPTIONS.theme_version = '0.20.0';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://docs.pylabrobot.org/dev/_static/switcher.json';
         DOCUMENTATION_OPTIONS.theme_switcher_version_match = 'dev';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             true;
         </script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
-    <script src="_static/plr_cards.js?v=0d03ad13"></script>
+    <script src="_static/plr_cards.js?v=9ebdf6b1"></script>
     <link rel="canonical" href="https://docs.pylabrobot.org/index.html" />
     <link rel="icon" href="_static/favicon.ico"/>
     <link rel="index" title="Index" href="genindex.html" />
@@ -63,7 +63,7 @@
     <link rel="next" title="User guide" href="user_guide/index.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.2.1" />
+  <meta name="docsearch:version" content="0.2.2" />
   
     
     <script src="_static/searchtools.js"></script>
@@ -81,7 +81,9 @@
   
   <button type="button" class="btn rounded-pill" id="pst-back-to-top">
     <i class="fa-solid fa-arrow-up"></i>Back to top</button>
-
+  
+  
+  
   
   <dialog id="pst-search-dialog">
     
@@ -248,11 +250,18 @@
       
         <div class="navbar-item">
 
-<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
-  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
-  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
-  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
-</button></div>
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
       
         <div class="navbar-item"><ul class="navbar-icon-links"
     aria-label="Icon Links">
@@ -265,8 +274,7 @@
           
           
           
-          <a href="https://x.com/pylabrobot" title="X" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-x-twitter fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">X</span></a>
+          <a href="https://x.com/pylabrobot" title="X" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-x-twitter fa-lg" aria-hidden="true"></i><span class="visually-hidden">X</span></a>
         </li>
         <li class="nav-item">
           
@@ -277,8 +285,7 @@
           
           
           
-          <a href="https://github.com/pylabrobot/pylabrobot" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">GitHub</span></a>
+          <a href="https://github.com/pylabrobot/pylabrobot" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
         </li>
         <li class="nav-item">
           
@@ -289,8 +296,7 @@
           
           
           
-          <a href="https://youtube.com/@pylabrobot" title="YouTube" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-youtube fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">YouTube</span></a>
+          <a href="https://youtube.com/@pylabrobot" title="YouTube" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-youtube fa-lg" aria-hidden="true"></i><span class="visually-hidden">YouTube</span></a>
         </li>
         <li class="nav-item">
           
@@ -301,8 +307,7 @@
           
           
           
-          <a href="https://bsky.app/profile/pylabrobot.bsky.social" title="Bluesky" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-bluesky fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">Bluesky</span></a>
+          <a href="https://bsky.app/profile/pylabrobot.bsky.social" title="Bluesky" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-bluesky fa-lg" aria-hidden="true"></i><span class="visually-hidden">Bluesky</span></a>
         </li>
 </ul></div>
       
@@ -432,11 +437,18 @@
         
           <div class="navbar-item">
 
-<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
-  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
-  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
-  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
-</button></div>
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
         
           <div class="navbar-item"><ul class="navbar-icon-links"
     aria-label="Icon Links">
@@ -449,8 +461,7 @@
           
           
           
-          <a href="https://x.com/pylabrobot" title="X" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-x-twitter fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">X</span></a>
+          <a href="https://x.com/pylabrobot" title="X" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-x-twitter fa-lg" aria-hidden="true"></i><span class="visually-hidden">X</span></a>
         </li>
         <li class="nav-item">
           
@@ -461,8 +472,7 @@
           
           
           
-          <a href="https://github.com/pylabrobot/pylabrobot" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">GitHub</span></a>
+          <a href="https://github.com/pylabrobot/pylabrobot" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
         </li>
         <li class="nav-item">
           
@@ -473,8 +483,7 @@
           
           
           
-          <a href="https://youtube.com/@pylabrobot" title="YouTube" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-youtube fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">YouTube</span></a>
+          <a href="https://youtube.com/@pylabrobot" title="YouTube" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-youtube fa-lg" aria-hidden="true"></i><span class="visually-hidden">YouTube</span></a>
         </li>
         <li class="nav-item">
           
@@ -485,8 +494,7 @@
           
           
           
-          <a href="https://bsky.app/profile/pylabrobot.bsky.social" title="Bluesky" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-bluesky fa-lg" aria-hidden="true"></i>
-            <span class="sr-only">Bluesky</span></a>
+          <a href="https://bsky.app/profile/pylabrobot.bsky.social" title="Bluesky" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-bluesky fa-lg" aria-hidden="true"></i><span class="visually-hidden">Bluesky</span></a>
         </li>
 </ul></div>
         
@@ -528,7 +536,7 @@
 <p><strong>PyLabRobot is a hardware- and operating system-agnostic, pure Python Software Development Kit (SDK) for Automated &amp; Autonomous Laboratories.</strong></p>
 <hr>
 <ul class="simple">
-<li><p><strong>GitHub repository</strong>: <a class="reference external" href="https://github.com/PyLabRobot/pylabrobot">https://github.com/PyLabRobot/pylabrobot</a></p></li>
+<li><p><strong>GitHub repository</strong>: <a class="github reference external" href="https://github.com/PyLabRobot/pylabrobot">PyLabRobot/pylabrobot</a></p></li>
 <li><p><strong>Community &amp; Developer Forum</strong>: <a class="reference external" href="https://discuss.pylabrobot.org">https://discuss.pylabrobot.org</a></p></li>
 <li><p><strong>Publication</strong>: <a class="reference external" href="https://www.cell.com/device/fulltext/S2666-9986(23)00170-9">Wierenga et al 2023, PyLabRobot: An Open-Source, Hardware Agnostic Interface for Liquid-Handling Robots and Accessories (Device)</a></p></li>
 <li><p><strong>Supported Machines</strong>: <a class="reference internal" href="user_guide/machines.html"><span class="std std-doc">supported machines</span></a></p></li>
@@ -560,6 +568,8 @@ PyHamilton is a Windows only interface to Hamilton’s VENUS.</p>
 <a class="reference external image-reference" href="https://www.alpaqua.com/"><img alt="Alpaqua" class="company" src="_images/logo_alpaqua.png" />
 </a>
 <a class="reference external image-reference" href="https://www.preciseflexrobots.com/"><img alt="Brooks" class="company" src="_images/logo_brooks.png" />
+</a>
+<a class="reference external image-reference" href="https://www.qinstruments.com"><img alt="QINSTRUMENTS" class="company" src="_images/logo_q.png" />
 </a>
 </section>
 <section id="used-by">
@@ -633,23 +643,6 @@ PyHamilton is a Windows only interface to Hamilton’s VENUS.</p>
 </pre></div>
 </div>
 <p><a class="reference external" href="https://scholar.google.com/scholar?cites=4498189371108132583">Cited by</a>:</p>
-<ul class="simple">
-<li><p>Tom, Gary, et al. “Self-driving laboratories for chemistry and materials science.” Chemical Reviews (2024).</p></li>
-<li><p>Anhel, Ana-Mariya, Lorea Alejaldre, and Ángel Goñi-Moreno. “The Laboratory Automation Protocol (LAP) Format and Repository: a platform for enhancing workflow efficiency in synthetic biology.” ACS synthetic biology 12.12 (2023): 3514-3520.</p></li>
-<li><p>Bultelle, Matthieu, Alexis Casas, and Richard Kitney. “Engineering biology and automation–Replicability as a design principle.” Engineering Biology (2024).</p></li>
-<li><p>Pleiss, Jürgen. “FAIR Data and Software: Improving Efficiency and Quality of Biocatalytic Science.” ACS Catalysis 14.4 (2024): 2709-2718.</p></li>
-<li><p>Gopal, Anjali, et al. “Will releasing the weights of large language models grant widespread access to pandemic agents?.” arXiv preprint arXiv:2310.18233 (2023).</p></li>
-<li><p>Padhy, Shakti P., and Sergei V. Kalinin. “Domain hyper-languages bring robots together and enable the machine learning community.” Device 1.4 (2023).</p></li>
-<li><p>Beaucage, Peter A., Duncan R. Sutherland, and Tyler B. Martin. “Automation and Machine Learning for Accelerated Polymer Characterization and Development: Past, Potential, and a Path Forward.” Macromolecules (2024).</p></li>
-<li><p>Bultelle, Matthieu, Alexis Casas, and Richard Kitney. “Construction of a Calibration Curve for Lycopene on a Liquid-Handling Platform─ Wider Lessons for the Development of Automated Dilution Protocols.” ACS Synthetic Biology (2024).</p></li>
-<li><p>Hysmith, Holland, et al. “The future of self-driving laboratories: from human in the loop interactive AI to gamification.” Digital Discovery 3.4 (2024): 621-636.</p></li>
-<li><p>Casas, Alexis, Matthieu Bultelle, and Richard Kitney. “An engineering biology approach to automated workflow and biodesign.” (2024).</p></li>
-<li><p>Jiang, Shuo, et al. “ProtoCode: Leveraging Large Language Models for Automated Generation of Machine-Readable Protocols from Scientific Publications.” arXiv preprint arXiv:2312.06241 (2023).</p></li>
-<li><p>Jiang, Shuo, et al. “ProtoCode: Leveraging large language models (LLMs) for automated generation of machine-readable PCR protocols from scientific publications.” SLAS technology 29.3 (2024): 100134.</p></li>
-<li><p>Thieme, Anton, et al. “Deep integration of low-cost liquid handling robots in an industrial pharmaceutical development environment.” SLAS technology (2024): 100180.</p></li>
-<li><p>Daniel, Čech. Adaptace algoritmů pro navigaci robota na základě apriorních informací. BS thesis. České vysoké učení technické v Praze. Vypočetní a informační centrum., 2024.</p></li>
-<li><p>Tenna Alexiadis Møller, Thom Booth, Simon Shaw, Vilhelm Krarup Møller, Rasmus J.N. Frandsen, Tilmann Weber. ActinoMation: a literate programming approach for medium-throughput robotic conjugation of Streptomyces spp. bioRxiv 2024.12.05.622625; doi: https://doi.org/10.1101/2024.12.05.622625</p></li>
-</ul>
 </section>
 </section>
 
@@ -737,8 +730,8 @@ PyHamilton is a Windows only interface to Hamilton’s VENUS.</p>
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script defer src="_static/scripts/bootstrap.js?digest=7f76b32a3354e82990f2"></script>
-<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=7f76b32a3354e82990f2"></script>
+  <script defer src="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
 
   <footer class="bd-footer">
 <div class="bd-footer__inner bd-page-width">
@@ -772,7 +765,7 @@ PyHamilton is a Windows only interface to Hamilton’s VENUS.</p>
         <div class="footer-item">
 <p class="theme-version">
   <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
-  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.17.0.
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
 </p></div>
       
     </div>
