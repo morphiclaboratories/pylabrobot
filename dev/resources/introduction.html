@@ -27,28 +27,30 @@
   </noscript>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="../_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
-<link href="../_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+  <link href="../_static/styles/theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=cb8930eaaf36d9849b67" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
     <link rel="stylesheet" type="text/css" href="../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" />
     <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/plr_devices.css?v=b0ac04d7" />
     <link rel="stylesheet" type="text/css" href="../_static/plr_cards.css?v=ed9dfa64" />
   
   <!-- So that users can add custom icons -->
-  <script defer src="../_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="../_static/scripts/fontawesome.js?digest=cb8930eaaf36d9849b67"></script>
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
-<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67" />
 
     <script src="../_static/documentation_options.js?v=3ce10a4d"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
     <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/plr_devices.js?v=2dde28f2"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'resources/introduction';</script>
     <script>
-        DOCUMENTATION_OPTIONS.theme_version = '0.20.0';
+        DOCUMENTATION_OPTIONS.theme_version = '0.21.0';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://docs.pylabrobot.org/dev/_static/switcher.json';
         DOCUMENTATION_OPTIONS.theme_switcher_version_match = 'dev';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
@@ -658,14 +660,53 @@
 <p>The size attributes are in millimeters and define the dimensions of the resource as a cuboid. This the complete outer bounding box of the resource. The <code class="docutils literal notranslate"><span class="pre">name</span></code> attribute is a unique identifier for the resource, and it can be used to reference the resource in protocols and programs.</p>
 <p>Here’s an example of a simple resource:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pylabrobot.resources</span><span class="w"> </span><span class="kn">import</span> <span class="n">Resource</span>
-<span class="n">resource</span> <span class="o">=</span> <span class="n">Resource</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;resource&quot;</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<span class="n">resource</span> <span class="o">=</span> <span class="n">Resource</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"resource"</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>To assign a child resource, you can use the <code class="docutils literal notranslate"><span class="pre">assign_child_resource</span></code> method:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pylabrobot.resources</span><span class="w"> </span><span class="kn">import</span> <span class="n">Resource</span><span class="p">,</span> <span class="n">Coordinate</span>
-<span class="n">child</span> <span class="o">=</span> <span class="n">Resource</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;child&quot;</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<span class="n">child</span> <span class="o">=</span> <span class="n">Resource</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"child"</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
 <span class="c1"># assign to bottom front left corner of parent</span>
 <span class="n">resource</span><span class="o">.</span><span class="n">assign_child_resource</span><span class="p">(</span><span class="n">child</span><span class="p">,</span> <span class="n">Coordinate</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span>
+</pre></div>
+</div>
+</section>
+<section id="resource-metadata">
+<h2>Resource Metadata<a class="headerlink" href="#resource-metadata" title="Link to this heading">#</a></h2>
+<p>You can attach generic key-value metadata to any <code class="docutils literal notranslate"><span class="pre">Resource</span></code> via the <code class="docutils literal notranslate"><span class="pre">metadata</span></code> parameter during initialization or by modifying <code class="docutils literal notranslate"><span class="pre">resource.metadata</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pylabrobot.resources</span><span class="w"> </span><span class="kn">import</span> <span class="n">Resource</span>
+
+<span class="n">plate</span> <span class="o">=</span> <span class="n">Resource</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">"plate1"</span><span class="p">,</span>
+    <span class="n">size_x</span><span class="o">=</span><span class="mf">127.76</span><span class="p">,</span>
+    <span class="n">size_y</span><span class="o">=</span><span class="mf">85.48</span><span class="p">,</span>
+    <span class="n">size_z</span><span class="o">=</span><span class="mf">14.5</span><span class="p">,</span>
+    <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"solvent"</span><span class="p">:</span> <span class="s2">"water"</span><span class="p">,</span> <span class="s2">"batch_id"</span><span class="p">:</span> <span class="s2">"B2026-07"</span><span class="p">,</span> <span class="s2">"is_sterilized"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+    <span class="n">model</span><span class="o">=</span><span class="s2">"vendor_plate_96_Vb"</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Metadata key-value pairs are included in serialization (<code class="docutils literal notranslate"><span class="pre">resource.serialize()</span></code>) and deserialization (<code class="docutils literal notranslate"><span class="pre">Resource.deserialize()</span></code>).</p>
+</section>
+<section id="finding-resources-find-resources-and-find-resource">
+<h2>Finding Resources (<code class="docutils literal notranslate"><span class="pre">find_resources</span></code> and <code class="docutils literal notranslate"><span class="pre">find_resource</span></code>)<a class="headerlink" href="#finding-resources-find-resources-and-find-resource" title="Link to this heading">#</a></h2>
+<p>You can query resources in a deck or resource tree using <code class="docutils literal notranslate"><span class="pre">find_resources</span></code> and <code class="docutils literal notranslate"><span class="pre">find_resource</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Find all resources with solvent="water"</span>
+<span class="n">water_plates</span> <span class="o">=</span> <span class="n">deck</span><span class="o">.</span><span class="n">find_resources</span><span class="p">(</span><span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"solvent"</span><span class="p">:</span> <span class="s2">"water"</span><span class="p">})</span>
+
+<span class="c1"># Check metadata key presence</span>
+<span class="n">sterilized_items</span> <span class="o">=</span> <span class="n">deck</span><span class="o">.</span><span class="n">find_resources</span><span class="p">(</span><span class="n">has_metadata</span><span class="o">=</span><span class="s2">"is_sterilized"</span><span class="p">)</span>
+
+<span class="c1"># Use predicate functions for metadata values (receives metadata.get(key), e.g. None if key is missing)</span>
+<span class="n">incubated</span> <span class="o">=</span> <span class="n">deck</span><span class="o">.</span><span class="n">find_resources</span><span class="p">(</span><span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"temperature"</span><span class="p">:</span> <span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">t</span> <span class="o">&gt;=</span> <span class="mf">37.0</span><span class="p">})</span>
+
+<span class="c1"># Filter by top-level attributes (name, type, model, category)</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pylabrobot.resources</span><span class="w"> </span><span class="kn">import</span> <span class="n">Plate</span>
+<span class="n">plates</span> <span class="o">=</span> <span class="n">deck</span><span class="o">.</span><span class="n">find_resources</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="n">Plate</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">"vendor_"</span><span class="p">))</span>
+
+<span class="c1"># Find the first matching resource</span>
+<span class="n">first_sterile</span> <span class="o">=</span> <span class="n">deck</span><span class="o">.</span><span class="n">find_resource</span><span class="p">(</span><span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"is_sterilized"</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
 </pre></div>
 </div>
 </section>
@@ -678,26 +719,26 @@
 <h4>Saving to and loading from a file<a class="headerlink" href="#saving-to-and-loading-from-a-file" title="Link to this heading">#</a></h4>
 <p>Resource definitions, that includes deck definitions, can be saved to and loaded from a file using the <code class="docutils literal notranslate"><span class="pre">pylabrobot.resources.resource.Resource.save</span></code> and <code class="docutils literal notranslate"><span class="pre">pylabrobot.resources.resource.Resource.load</span></code> methods. The file format is JSON.</p>
 <p>To save a resource to a file:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">&quot;resource.json&quot;</span><span class="p">)</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">"resource.json"</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>This will create a file <code class="docutils literal notranslate"><span class="pre">resource.json</span></code> with the resource definition.</p>
 <div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;resource&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Resource&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;size_x&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;size_y&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;size_z&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;location&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;category&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;children&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
-<span class="w">  </span><span class="nt">&quot;parent_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"resource"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Resource"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"size_x"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"size_y"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"size_z"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"location"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"children"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">  </span><span class="nt">"parent_name"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
 <span class="p">}</span>
 </pre></div>
 </div>
 <p>To load the resource from the file:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span> <span class="o">=</span> <span class="n">Resource</span><span class="o">.</span><span class="n">load_from_json_file</span><span class="p">(</span><span class="s2">&quot;resource.json&quot;</span><span class="p">)</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span> <span class="o">=</span> <span class="n">Resource</span><span class="o">.</span><span class="n">load_from_json_file</span><span class="p">(</span><span class="s2">"resource.json"</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
@@ -721,17 +762,17 @@
 <p>The state of a single resource, that includes the volume of a container, can be serialized to and deserialized from a Python dictionary using the <code class="docutils literal notranslate"><span class="pre">pylabrobot.resources.resource.Resource.serialize_state</span></code> and <code class="docutils literal notranslate"><span class="pre">pylabrobot.resources.resource.Resource.deserialize_state</span></code> methods.</p>
 <p>To serialize the state of a resource:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pylabrobot.resources</span><span class="w"> </span><span class="kn">import</span> <span class="n">Container</span>
-<span class="n">c</span> <span class="o">=</span> <span class="n">Container</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;container&quot;</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<span class="n">c</span> <span class="o">=</span> <span class="n">Container</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"container"</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
 <span class="n">c</span><span class="o">.</span><span class="n">serialize_state</span><span class="p">()</span>
 </pre></div>
 </div>
 <p>This will return a dictionary with the state of the resource:</p>
-<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;liquids&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span><span class="w"> </span><span class="nt">&quot;pending_liquids&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="w"> </span><span class="nt">"liquids"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span><span class="w"> </span><span class="nt">"pending_liquids"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">}</span>
 </pre></div>
 </div>
 <p>To deserialize the state of a resource:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">c</span> <span class="o">=</span> <span class="n">Container</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;container&quot;</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
-<span class="n">c</span><span class="o">.</span><span class="n">load_state</span><span class="p">({</span> <span class="s2">&quot;liquids&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;pending_liquids&quot;</span><span class="p">:</span> <span class="p">[]</span> <span class="p">})</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">c</span> <span class="o">=</span> <span class="n">Container</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"container"</span><span class="p">,</span> <span class="n">size_x</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_y</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">size_z</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<span class="n">c</span><span class="o">.</span><span class="n">load_state</span><span class="p">({</span> <span class="s2">"liquids"</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">"pending_liquids"</span><span class="p">:</span> <span class="p">[]</span> <span class="p">})</span>
 </pre></div>
 </div>
 <p>This is convenient if you want to use PLR state in your own state management system, or save to a database.</p>
@@ -741,7 +782,7 @@
 <h4>Saving and loading state to and from a file<a class="headerlink" href="#saving-and-loading-state-to-and-from-a-file" title="Link to this heading">#</a></h4>
 <p>The state of a resource, that includes the volume of a container, can be saved to and loaded from a file using the <code class="docutils literal notranslate"><span class="pre">pylabrobot.resources.resource.Resource.save_state_to_file</span></code> and <code class="docutils literal notranslate"><span class="pre">pylabrobot.resources.resource.Resource.load_state_from_file</span></code> methods. The file format is JSON.</p>
 <p>To save the state of a resource to a file:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span><span class="o">.</span><span class="n">save_state_to_file</span><span class="p">(</span><span class="s2">&quot;resource_state.json&quot;</span><span class="p">)</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span><span class="o">.</span><span class="n">save_state_to_file</span><span class="p">(</span><span class="s2">"resource_state.json"</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>By default, a Resource will not have a state:</p>
@@ -749,11 +790,11 @@
 </pre></div>
 </div>
 <p>If you had serialized a <a class="reference internal" href="../api/_autosummary/pylabrobot.resources.Container.html#pylabrobot.resources.Container" title="pylabrobot.resources.Container"><code class="xref py py-class docutils literal notranslate"><span class="pre">pylabrobot.resources.Container</span></code></a> with a volume of 1000 uL, the file would look like this:</p>
-<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;liquids&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span><span class="w"> </span><span class="nt">&quot;pending_liquids&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="w"> </span><span class="nt">"liquids"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span><span class="w"> </span><span class="nt">"pending_liquids"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">}</span>
 </pre></div>
 </div>
 <p>To load the state of a resource from a file:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span><span class="o">.</span><span class="n">load_state_from_file</span><span class="p">(</span><span class="s2">&quot;resource_state.json&quot;</span><span class="p">)</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resource</span><span class="o">.</span><span class="n">load_state_from_file</span><span class="p">(</span><span class="s2">"resource_state.json"</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
@@ -809,6 +850,8 @@
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#defining-a-simple-resource">Defining a simple resource</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#resource-metadata">Resource Metadata</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#finding-resources-find-resources-and-find-resource">Finding Resources (<code class="docutils literal notranslate"><span class="pre">find_resources</span></code> and <code class="docutils literal notranslate"><span class="pre">find_resource</span></code>)</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#saving-and-loading-resources">Saving and loading resources</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#definitions">Definitions</a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#saving-to-and-loading-from-a-file">Saving to and loading from a file</a></li>
@@ -863,8 +906,8 @@
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script defer src="../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
-<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+  <script defer src="../_static/scripts/bootstrap.js?digest=cb8930eaaf36d9849b67"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=cb8930eaaf36d9849b67"></script>
 
   <footer class="bd-footer">
 <div class="bd-footer__inner bd-page-width">
@@ -898,7 +941,7 @@
         <div class="footer-item">
 <p class="theme-version">
   <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
-  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.21.0.
 </p></div>
       
     </div>
