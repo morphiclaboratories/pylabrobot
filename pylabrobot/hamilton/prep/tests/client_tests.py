@@ -1,13 +1,35 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
 from pylabrobot.hamilton.prep import Prep, PrepChatterboxClient
 from pylabrobot.hamilton.prep import prep_commands as PrepCmd
 from pylabrobot.hamilton.prep.channels import PrepChannels
+from pylabrobot.hamilton.prep.client import PrepClient
 from pylabrobot.hamilton.prep.gripper import PrepGripper, PrepGripperArm
 from pylabrobot.hamilton.transport.tcp.packets import Address
+from pylabrobot.hamilton.transport.tcp.protocol import Hoi2Action
 from pylabrobot.resources.hamilton import STARLetDeck
+
+
+@pytest.mark.parametrize("command_id,interface_id", [(9, 3), (8, 3), (2, 2), (5, 3)])
+def test_firmware_string_queries_send_status_requests(command_id, interface_id):
+  """Identity queries send the requested method and decode its string response."""
+  client = PrepClient(host="127.0.0.1")
+  address = Address(1, 1, 0x100)
+  payload = b"\x0f\x00\x08\x00PREP123\x00"
+  client.send_query = AsyncMock(return_value=(payload,))  # type: ignore[method-assign]
+
+  result = asyncio.run(client._query_firmware_string(address, command_id, interface_id))
+
+  assert result == "PREP123"
+  client.send_query.assert_awaited_once()
+  command = client.send_query.call_args.args[0]
+  assert command.dest == address
+  assert command.command_id == command_id
+  assert command.interface_id == interface_id
+  assert command.action_code == Hoi2Action.STATUS_REQUEST
 
 
 def test_chatterbox_sets_resolved_interfaces_and_channels():

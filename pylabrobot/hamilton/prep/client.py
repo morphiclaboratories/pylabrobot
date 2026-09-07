@@ -175,13 +175,9 @@ class PrepClient(HamiltonTCPClient):
     self, addr: Address, cmd_id: int, iface_id: int = 3
   ) -> Optional[str]:
     """Send a status query and decode the string response."""
-    ns: dict[str, Any] = {
-      "command_id": cmd_id,
-      "interface_id": iface_id,
-      "__annotations__": {"dest": Address},
-    }
-    Cmd = type("_FWQuery", (PrepCmd.PrepStatusRequest,), ns)
-    raw_resp: object = await self.send_query(Cmd(dest=addr))
+    raw_resp: object = await self.send_query(
+      PrepCmd.PrepProbeRequest(dest=addr, command_id=cmd_id, interface_id=iface_id)
+    )
     if raw_resp is None:
       return self._decode_firmware_string(None)
     if not isinstance(raw_resp, tuple):
